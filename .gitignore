@@ -1,0 +1,37 @@
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# brain-agent (Personal Brain / core) .gitignore — public 版
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ★このリポジトリはコアのみ。実データ (会話・売上・人格・wiki 本文) は一切含まない。
+#   data/ 配下は runtime で生成される個人データなので全 ignore (誤 commit 防止)。
+
+# 実データ・生成物 (絶対に commit しない)
+data/
+chroma_data/
+*.pem
+*.key
+
+# secret / env
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# logs / tmp
+*.log
+scratchpad/
+tmp/

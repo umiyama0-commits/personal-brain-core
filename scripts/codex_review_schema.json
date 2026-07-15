@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "findings": {
+      "type": "array",
+      "description": "発見した問題のリスト。問題が無ければ空配列。",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["high", "medium", "low"],
+            "description": "high=バグ/データ破壊/セキュリティ, medium=ロジック懸念/設計, low=軽微/可読性"
+          },
+          "file": {"type": "string", "description": "path:line など対象箇所"},
+          "title": {"type": "string", "description": "1 行要約"},
+          "detail": {"type": "string", "description": "根拠と再現条件、推奨修正"}
+        },
+        "required": ["severity", "file", "title", "detail"]
+      }
+    },
+    "summary": {"type": "string", "description": "全体所感を 1-2 文で"}
+  },
+  "required": ["findings", "summary"]
+}

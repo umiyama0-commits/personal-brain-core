@@ -1,0 +1,77 @@
+# gitleaks rules — brain-agent 専用補強
+# ★2026-05-25 BLOCKER 後対応: 過去 leak した token / API key パターンの再発防止
+title = "brain-agent gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "cohere-api-key"
+description = "Cohere API key (Cohere AI rerank/etc.)"
+regex = '''cohere_[A-Za-z0-9]{30,}'''
+secretGroup = 0
+keywords = ["cohere_"]
+
+[[rules]]
+id = "alignment-trial-token-hardcode"
+description = "ALIGNMENT_TRIAL_TOKEN を hardcode default にしてはいけない (.env 経由のみ)"
+regex = '''ALIGNMENT_TRIAL_TOKEN\s*=\s*["'][A-Za-z0-9_\-]{20,}["']'''
+keywords = ["ALIGNMENT_TRIAL_TOKEN"]
+
+[[rules]]
+id = "voice-align-token-hardcode"
+description = "VOICE_ALIGN_TOKEN を hardcode default にしてはいけない"
+regex = '''VOICE_ALIGN_TOKEN\s*=\s*["'][A-Za-z0-9_\-]{20,}["']'''
+keywords = ["VOICE_ALIGN_TOKEN"]
+
+[[rules]]
+id = "elevenlabs-api-key"
+description = "ElevenLabs API key (sk_ prefix, 48 hex)"
+regex = '''sk_[0-9a-f]{48,}'''
+keywords = ["sk_"]
+
+[[rules]]
+id = "vapi-pk-uuid"
+description = "Vapi Public Key (UUID format)"
+regex = '''VAPI_PUBLIC_KEY\s*=\s*["']?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}["']?'''
+keywords = ["VAPI_PUBLIC_KEY"]
+
+[[rules]]
+id = "litellm-master-key"
+description = "LiteLLM master key (sk-litellm- prefix) を hardcode してはいけない (.env 経由のみ)"
+regex = '''sk-litellm-[A-Za-z0-9_\-]{6,}'''
+keywords = ["sk-litellm-"]
+
+[[rules]]
+id = "owndays-mobile-password"
+description = "社内システム password (会社固有 prefix + 数字) を hardcode してはいけない (.env 経由のみ)"
+regex = '''(?i)(mobilepass|netmobile_pass)\s*[:=]\s*[A-Za-z0-9]{6,}'''
+keywords = ["mobilepass", "netmobile"]
+
+[[rules]]
+id = "stapa-login-hardcode"
+description = "STAPA scraper の LOGIN_PASS を hardcode してはいけない (.env 経由のみ)"
+regex = '''LOGIN_PASS\s*=\s*["'][^"']{6,}["']'''
+keywords = ["LOGIN_PASS"]
+
+[[rules]]
+id = "lineworks-login-pw-hardcode"
+description = "LINE Works scraper の --login-pw を平文 hardcode してはいけない (.env 経由のみ、★2026-06-08 評価 0-1: 旧 LW パスワードが既存 rule を素通りした gap 修正)"
+# CLI 引数 `--login-pw "値"` (空白 + クォート + 非 $ 文字始まり) を検出。
+# `--login-pw "$VAR"` (env 参照) と argparse 定義 `"--login-pw"` は除外。
+regex = '''--login-pw\s+["'][^"'$][^"']*["']'''
+keywords = ["login-pw"]
+
+[allowlist]
+description = "test fixtures + 例示 placeholder は許容 (.env.example の your-password / your-key-here 等)"
+paths = [
+    '''^\.env\.example$''',
+    '''^docs/.*\.md$''',  # docs は <REDACTED> / placeholder 形式で書く前提
+]
+regexes = [
+    '''cohere_<[A-Z_]+>''',           # cohere_<REDACTED_*> placeholder
+    '''cohere_[A-Za-z0-9]{10}\.{3}''',  # 過去 leak token の sanitize 痕跡 (汎用形)
+    '''sk_[a-z]{4}\.{3}''',           # sk_xxxx... display 例
+    '''your-password''',              # .env.example の OWNDAYS/STAPA placeholder
+    '''sk-litellm-your-key-here''',   # .env.example の LiteLLM placeholder
+]

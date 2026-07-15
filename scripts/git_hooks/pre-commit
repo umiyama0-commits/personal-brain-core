@@ -1,0 +1,57 @@
+#!/bin/bash
+# pre-commit — gitleaks secret スキャン (fail-closed)。★2026-07-02 監査 P1f
+#
+# §1.1: secret 平文直書き (.py/.md/.yaml) を commit 段階で block する防御線。
+# これまで .gitleaks.toml と .pre-commit-config.yaml は在ったが hook が未インストールで inert だった。
+#
+# 方針:
+# - gitleaks binary が在れば staged 差分をスキャンし、leak 検出で commit を中止 (exit 1)。
+# - gitleaks が **無い** 場合も commit を中止 (fail-closed)。silent skip = 「守られてる」誤認が
+#   最悪 (§1.18)。導入は `brew install gitleaks`。どうしても急ぐ時のみ `GITLEAKS_BYPASS=1` で明示 bypass。
+#
+# 設置: scripts/install_git_hooks.sh (本 file を .git/hooks/pre-commit へ複製)。
+set -uo pipefail
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$REPO_ROOT" || exit 0
+
+# ─── dep-graph 自動再生成 (★2026-07-03 オントロジー: AST から決定論的に) ───
+# staged に .py (tests/ data/ 除く) があれば docs/review/dep-graph.md を再生成して同 commit に同梱
+# (通常 git hook 意味論 = ここで git add した分はこの commit に入る)。docs であり秘密ゲートでは
+# ないので fail-open (失敗しても commit 続行、警告のみ)。gitleaks の前 = 生成物もスキャン対象。
+if git diff --cached --name-only 2>/dev/null | grep -E '\.py$' | grep -vE '^(tests|data)/' | grep -q .; then
+    if python3 "$REPO_ROOT/scripts/build_dep_graph.py" --quiet 2>/dev/null; then
+        git add "$REPO_ROOT/docs/review/dep-graph.md" 2>/dev/null || true
+    else
+        echo "⚠️ dep-graph 再生成失敗 (commit は続行) — python3 scripts/build_dep_graph.py で確認を" >&2
+    fi
+fi
+
+if [ "${GITLEAKS_BYPASS:-0}" = "1" ]; then
+    echo "⚠️ gitleaks pre-commit を GITLEAKS_BYPASS=1 で bypass。secret 混入に注意。" >&2
+    exit 0
+fi
+
+# gitleaks binary の解決 (PATH + Homebrew/Intel 既定)
+GL="$(command -v gitleaks 2>/dev/null || true)"
+[ -z "$GL" ] && [ -x /opt/homebrew/bin/gitleaks ] && GL=/opt/homebrew/bin/gitleaks
+[ -z "$GL" ] && [ -x /usr/local/bin/gitleaks ] && GL=/usr/local/bin/gitleaks
+
+if [ -z "$GL" ]; then
+    echo "❌ gitleaks 未インストール = staged の secret スキャン不能 → commit 中止 (fail-closed)。" >&2
+    echo "   導入: brew install gitleaks" >&2
+    echo "   一時 bypass (非推奨): GITLEAKS_BYPASS=1 git commit ..." >&2
+    exit 1
+fi
+
+CONFIG_ARG=""
+[ -f "$REPO_ROOT/.gitleaks.toml" ] && CONFIG_ARG="--config=$REPO_ROOT/.gitleaks.toml"
+
+# staged 差分のみをスキャン (git --staged = 非 deprecated の pre-commit モード)
+if ! "$GL" git --staged $CONFIG_ARG --redact --no-banner; then
+    echo "" >&2
+    echo "❌ gitleaks: staged 変更に secret を検出 → commit 中止。" >&2
+    echo "   secret は .env 経由 (os.getenv) に。誤検知なら .gitleaks.toml の allowlist へ、" >&2
+    echo "   緊急時のみ GITLEAKS_BYPASS=1 git commit で bypass。" >&2
+    exit 1
+fi
+exit 0

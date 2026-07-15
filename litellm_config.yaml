@@ -1,0 +1,135 @@
+model_list:
+  - model_name: smart
+    litellm_params:
+      model: anthropic/claude-opus-4-8
+      api_key: os.environ/ANTHROPIC_API_KEY
+  # ★2026-07-01 smart 切替候補: Sonnet 5 ($2/$10 導入価格〜8/31、標準 $3/$15)。
+  # Opus 4.8 と同系トークナイザで純比較可。compare_models.py で A/B 中 (本番 routing 未接続)。
+  - model_name: smart-sonnet
+    litellm_params:
+      model: anthropic/claude-sonnet-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+  # 旧 Opus 4 (2025-05) — 比較用に残す
+  - model_name: smart-legacy
+    litellm_params:
+      model: anthropic/claude-opus-4-20250514
+      api_key: os.environ/ANTHROPIC_API_KEY
+  # smart のフォールバック先（Anthropic残高切れ・障害時に自動切替）
+  - model_name: smart-fallback
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+  # ★2026-05-23 Plan C v2 Step 1: Contextual Retrieval 専用 (= Haiku 4.5、cookbook 推奨)
+  # 各 wiki chunk に 50-100 token の context を生成して prepend、retrieval failure -67%
+  # cookbook 出典: https://platform.claude.com/cookbook/capabilities-contextual-embeddings-guide
+  - model_name: contextualize
+    litellm_params:
+      model: anthropic/claude-haiku-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+  # ★2026-07-10 海山指示「システム全体の監督者に Fable 5」: supervisor 役割。
+  # 対象 = 低頻度・高judgment の synthesis 系のみ (clone_auto_improve 日次判断 /
+  # clone_weekly_report / ai_research_agent 提案 ≈ 月40回 → トークン微小)。
+  # judge/verifier 層 (regression/hallucination/external-eval) は別系列原則
+  # (pick_cross_family_judge = self-eval loop 遮断) を維持し対象外。
+  - model_name: supervisor
+    litellm_params:
+      model: anthropic/claude-fable-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+      # Fable 5 は temperature/top_p/top_k を 400 拒否 (公式 docs) → 未対応 param を落とす
+      drop_params: true
+      # thinking 常時 on で応答が長い (数分が正常域) → 既定 request_timeout 60s では切れる
+      timeout: 240
+  - model_name: fast
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: default
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+
+  # ─── GPT-5.x 追加役割 (モデル比較・切替用) ───────────────
+  # flagship — smart 代替候補
+  - model_name: smart-gpt
+    litellm_params:
+      model: openai/gpt-5.4
+      api_key: os.environ/OPENAI_API_KEY
+  # 高 effort (重量推論)
+  - model_name: smart-gpt-pro
+    litellm_params:
+      model: openai/gpt-5.4-pro
+      api_key: os.environ/OPENAI_API_KEY
+  # 軽量 (fast 代替候補)
+  - model_name: fast-gpt
+    litellm_params:
+      model: openai/gpt-5.4-mini
+      api_key: os.environ/OPENAI_API_KEY
+  # コード特化 (chat 互換 / 高 effort)
+  # 注: GPT-5 Codex 系は /v1/responses 専用で chat/completions 非対応。
+  # litellm 経由 (= Brain 内部) では gpt-5.4-pro を code 役割に。
+  # 真の Codex agent 運用は Codex CLI で直接 (/v1/responses) 使う。
+  - model_name: code
+    litellm_params:
+      model: openai/gpt-5.4-pro
+      api_key: os.environ/OPENAI_API_KEY
+  # code-max: 重量 refactor — 同じく chat 互換で最強クラス
+  - model_name: code-max
+    litellm_params:
+      model: openai/gpt-5-pro
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: text-embedding-3-small
+    litellm_params:
+      model: openai/text-embedding-3-small
+      api_key: os.environ/OPENAI_API_KEY
+
+  # ★2026-05-27 海山指示「音声会話対応」 の input path 用 Whisper.
+  # endpoint: /v1/audio/transcriptions (= multipart file upload, OpenAI compatible).
+  # Output (= TTS、海山音声 clone) は Mac Studio で別途 ElevenLabs 統合予定.
+  - model_name: whisper
+    litellm_params:
+      model: openai/whisper-1
+      api_key: os.environ/OPENAI_API_KEY
+
+  # ★2026-07-10 (世界基準評価 #7): fast/default 系の Anthropic 逃げ道 (Haiku 4.5)。
+  # fast (GPT-4o) → fast-gpt (5.4-mini) → smart-fallback (GPT-4o) が全て OpenAI で、
+  # 5/22 の OpenAI 9h 全断時に fast/default (privacy 分類・chat) が全滅する構造だった。
+  # cross-provider の最終段として fallback 末尾に足す。
+  - model_name: fast-anthropic
+    litellm_params:
+      model: anthropic/claude-haiku-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+litellm_settings:
+  # ─── 多段 fallback (★2026-05-23 海山指示、レジリエンス Layer 2) ───
+  # 5/22 OpenAI quota 枯渇事案: smart (Opus) のみで稼働、quota 枯れて全 429 連発、
+  # 9 時間 fallback 連発まで海山が気付けなかった。fallback chain を 3 段化して
+  # 1 model 詰まっても自動切替で稼働継続できるよう構造化。
+  fallbacks:
+    # smart (Opus 4.8) → GPT-4o → GPT-5.4 (= Anthropic / OpenAI gpt-4o / OpenAI gpt-5.4 と 3 provider 経路)
+    - smart: ["smart-fallback", "smart-gpt"]
+    # fast (GPT-4o) → GPT-5.4-mini → GPT-4o → Haiku 4.5 (★2026-07-10 #7: 末尾に Anthropic 逃げ道)
+    - fast: ["fast-gpt", "smart-fallback", "fast-anthropic"]
+    # default (GPT-4o、privacy 分類・chat) も Anthropic 逃げ道を確保 (OpenAI 全断で quarantine 全倒れ回避)
+    - default: ["fast-gpt", "fast-anthropic"]
+    # smart-gpt (GPT-5.4) → GPT-4o (= OpenAI quota 全断時の保険)
+    - smart-gpt: ["smart-fallback"]
+    # supervisor (Fable 5) → Opus 4.8 → GPT-4o (= Fable 5 未提供/quota 時も監督者層は稼働継続)
+    - supervisor: ["smart", "smart-fallback"]
+  # 400/429 もフォールバック対象に (既定は 5xx のみ)。各 model 3 回 retry してから次 fallback へ。
+  num_retries: 3
+  request_timeout: 60
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # ─── Cost cap (★2026-05-23 LEE §4.2、★2026-07-10 世界基準評価 #5 で実効化) ─────
+  # 「scraper 無限ループ / /claude ループ命令 / sleep-time 暴走」等で Anthropic / OpenAI の
+  # 請求が数時間で数万円〜数十万円規模に膨らむ事故を防ぐ hard cap。
+  # ★2026-07-10: 従来は Postgres 未接続で **inert** (効いていなかった、6/11 failure-log 実証)。
+  #   docker-compose に litellm-db (Postgres) を足し DATABASE_URL を接続 → spend が DB 集計され
+  #   本 max_budget が実際の hard cap になる。超過時は litellm が **401** を返し (bot は fallback
+  #   文言を表示)、日次 09:00 の clone_cost_summary が閾値 ($40) 到達で critical 通知する二段構え。
+  #   50 USD/日 (~¥7,500)。通常日は $40 未満 (alert 閾値) のため headroom あり。busy day で
+  #   false-trip する場合はこの値を上げる (= 稀。$700 級の runaway を確実に止めるのが主目的)。
+  max_budget: 50
+  budget_duration: 1d

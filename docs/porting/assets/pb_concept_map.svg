@@ -1,0 +1,76 @@
+<svg viewBox="0 0 760 470" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="pbmTitle pbmDesc" font-family="-apple-system, 'Hiragino Sans', 'Noto Sans JP', sans-serif">
+<title id="pbmTitle">Personal Brain 全体マップ</title>
+<desc id="pbmDesc">社長の人格(判断軸・価値観・口調)と会社の事実(売上・店舗・エリア・組織・戦略)が中心の Personal Brain を介して結びつき、検索・生成エンジンと品質ループ・プライバシー関所を通じて社員に応答する知識マップ。</desc>
+
+<text x="110" y="44" font-size="12.5" fill="#9aa6b0">── 社長の人格 ──</text>
+<text x="612" y="44" font-size="12.5" fill="#9aa6b0">── 会社の事実 ──</text>
+
+<g stroke="#b9c4cf" stroke-width="1.6" fill="none">
+<line x1="380" y1="225" x2="175" y2="200"/>
+<line x1="380" y1="225" x2="585" y2="190"/>
+<line x1="380" y1="253" x2="380" y2="340"/>
+<line x1="175" y1="200" x2="95" y2="120"/>
+<line x1="175" y1="200" x2="100" y2="285"/>
+<line x1="175" y1="200" x2="205" y2="303"/>
+<line x1="585" y1="190" x2="560" y2="85"/>
+<line x1="585" y1="190" x2="680" y2="115"/>
+<line x1="585" y1="190" x2="700" y2="205"/>
+<line x1="585" y1="190" x2="695" y2="290"/>
+<line x1="585" y1="190" x2="560" y2="300"/>
+<line x1="680" y1="115" x2="700" y2="189"/>
+<line x1="695" y1="290" x2="600" y2="300"/>
+<line x1="380" y1="360" x2="240" y2="410"/>
+<line x1="380" y1="360" x2="520" y2="410"/>
+</g>
+
+<path d="M95,120 Q340,18 560,85" stroke="#d8a24a" stroke-width="1.6" stroke-dasharray="5 4" fill="none"/>
+<text x="335" y="48" text-anchor="middle" font-size="11.5" fill="#b3772a">判断軸 ↔ 戦略 がつながる</text>
+
+<rect x="296" y="197" width="168" height="56" rx="11" fill="#2a4d69"/>
+<text x="380" y="221" text-anchor="middle" font-size="16" fill="#ffffff" font-weight="500">Personal Brain</text>
+<text x="380" y="240" text-anchor="middle" font-size="11" fill="#cdd9e5">社長の分身</text>
+
+<g font-size="13.5">
+<rect x="123" y="180" width="104" height="40" rx="8" fill="#eef3f8" stroke="#2a4d69" stroke-width="1.5"/>
+<text x="175" y="204" text-anchor="middle" fill="#214055">人格の核</text>
+<rect x="49" y="103" width="92" height="34" rx="8" fill="#eef3f8" stroke="#2a4d69" stroke-width="1.5"/>
+<text x="95" y="125" text-anchor="middle" fill="#214055">判断軸</text>
+<rect x="54" y="268" width="92" height="34" rx="8" fill="#eef3f8" stroke="#2a4d69" stroke-width="1.5"/>
+<text x="100" y="290" text-anchor="middle" fill="#214055">価値観</text>
+<rect x="141" y="303" width="128" height="34" rx="8" fill="#eef3f8" stroke="#2a4d69" stroke-width="1.5"/>
+<text x="205" y="325" text-anchor="middle" fill="#214055">口調・語り口</text>
+</g>
+
+<g font-size="13.5">
+<rect x="525" y="168" width="120" height="44" rx="8" fill="#e9f4ee" stroke="#2f8f63" stroke-width="1.5"/>
+<text x="585" y="194" text-anchor="middle" fill="#1f6b4a">会社の事実</text>
+<rect x="518" y="69" width="84" height="32" rx="8" fill="#e9f4ee" stroke="#2f8f63" stroke-width="1.5"/>
+<text x="560" y="90" text-anchor="middle" fill="#1f6b4a">戦略</text>
+<rect x="640" y="99" width="80" height="32" rx="8" fill="#e9f4ee" stroke="#2f8f63" stroke-width="1.5"/>
+<text x="680" y="120" text-anchor="middle" fill="#1f6b4a">売上</text>
+<rect x="644" y="189" width="112" height="32" rx="8" fill="#e9f4ee" stroke="#2f8f63" stroke-width="1.5"/>
+<text x="700" y="210" text-anchor="middle" fill="#1f6b4a">店舗:池袋</text>
+<rect x="639" y="274" width="112" height="32" rx="8" fill="#e9f4ee" stroke="#2f8f63" stroke-width="1.5"/>
+<text x="695" y="295" text-anchor="middle" fill="#1f6b4a">エリア:関東</text>
+<rect x="520" y="284" width="80" height="32" rx="8" fill="#e9f4ee" stroke="#2f8f63" stroke-width="1.5"/>
+<text x="560" y="305" text-anchor="middle" fill="#1f6b4a">組織</text>
+</g>
+
+<g font-size="13">
+<rect x="305" y="340" width="150" height="40" rx="8" fill="#eef0f2" stroke="#6b7785" stroke-width="1.5"/>
+<text x="380" y="364" text-anchor="middle" fill="#3a4651">検索 → 生成</text>
+<rect x="184" y="394" width="112" height="32" rx="8" fill="#fbf3e6" stroke="#c08a2e" stroke-width="1.5"/>
+<text x="240" y="415" text-anchor="middle" fill="#7a5210">品質ループ</text>
+<rect x="458" y="394" width="124" height="32" rx="8" fill="#fbf3e6" stroke="#c08a2e" stroke-width="1.5"/>
+<text x="520" y="415" text-anchor="middle" fill="#7a5210">プライバシー関所</text>
+</g>
+
+<g font-size="12">
+<rect x="150" y="446" width="14" height="14" rx="3" fill="#eef3f8" stroke="#2a4d69"/>
+<text x="170" y="457" fill="#5f5e5a">人格</text>
+<rect x="232" y="446" width="14" height="14" rx="3" fill="#e9f4ee" stroke="#2f8f63"/>
+<text x="252" y="457" fill="#5f5e5a">会社の事実</text>
+<rect x="350" y="446" width="14" height="14" rx="3" fill="#fbf3e6" stroke="#c08a2e"/>
+<text x="370" y="457" fill="#5f5e5a">守り(品質・プライバシー)</text>
+</g>
+</svg>

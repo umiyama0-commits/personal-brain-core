@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- host_docker_watchdog を launchd で 5 分毎実行 (★2026-06-15)。
+     crontab 自動登録が cron 文脈の TCC 権限不足で機能しないこと、加えて watchdog の
+     Docker 再起動(open -a Docker)が GUI セッション必須であることから、cron でなく
+     LaunchAgent(ログイン GUI セッションで実行)が機能的にも正しい。
+     設置: scripts/install_launchagents.sh (SSH/対話セッションから 1 回 load すれば
+     以後はログイン時自動ロード=再起動も生存)。 -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.brain.docker-watchdog</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>/Users/brain/brain-agent/scripts/host_docker_watchdog.sh</string>
+	</array>
+	<key>StartInterval</key>
+	<integer>300</integer>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>/Users/brain/brain-agent/data/brain/host_watchdog.cron.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/brain/brain-agent/data/brain/host_watchdog.cron.log</string>
+</dict>
+</plist>

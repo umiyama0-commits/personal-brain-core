@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "brain": {
+      "command": "/Users/brain/brain-agent/.venv/bin/python3",
+      "args": ["/Users/brain/brain-agent/mcp_brain_server.py"]
+    }
+  }
+}

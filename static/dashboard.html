@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Brain">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="manifest" href="/static/manifest.json">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
+<title>Dashboard - Personal Brain</title>
+<style>
+:root {
+  --bg: #0a0a0a; --surface: #141414; --surface2: #1e1e1e;
+  --border: #2a2a2a; --border2: #333; --text: #e8e8e8; --text2: #999; --text3: #666;
+  --accent: #2563eb; --accent-dim: #1d4ed8; --accent-soft: rgba(37,99,235,0.12);
+  --green: #4ade80; --green-dim: rgba(74,222,128,0.15);
+  --red: #f87171; --red-dim: rgba(248,113,113,0.15);
+  --amber: #fbbf24; --amber-dim: rgba(251,191,36,0.15);
+  --purple: #a78bfa; --purple-dim: rgba(167,139,250,0.12);
+  --radius: 14px; --radius-sm: 10px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { height: 100%; scroll-behavior: smooth; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', sans-serif;
+  background: var(--bg); color: var(--text); min-height: 100%;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ─── Login ─── */
+.login {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  height: 100dvh; gap: 20px; padding: 24px;
+}
+.login-logo {
+  width: 72px; height: 72px; border-radius: 18px; background: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 32px; font-weight: 700; color: #fff;
+}
+.login h1 { font-size: 22px; color: #fff; font-weight: 600; }
+.login p { font-size: 14px; color: var(--text2); }
+.login input {
+  width: 100%; max-width: 280px; padding: 14px 18px; background: var(--surface2);
+  border: 1px solid var(--border); border-radius: 12px; color: #fff;
+  font-size: 16px; outline: none; text-align: center;
+}
+.login input:focus { border-color: var(--accent); }
+.login button {
+  width: 100%; max-width: 280px; padding: 14px; background: var(--accent);
+  color: #fff; border: none; border-radius: 12px; font-size: 16px;
+  font-weight: 600; cursor: pointer;
+}
+.login button:active { background: var(--accent-dim); }
+
+/* ─── Header ─── */
+.header {
+  position: sticky; top: 0; z-index: 50;
+  padding: 14px 20px; padding-top: max(14px, var(--safe-top));
+  background: rgba(10,10,10,0.85); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.header-left { display: flex; align-items: center; gap: 10px; }
+.header .status-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+  box-shadow: 0 0 6px rgba(74,222,128,0.4); flex-shrink: 0;
+}
+.header h1 { font-size: 17px; font-weight: 600; color: #fff; letter-spacing: -0.3px; }
+.header-right { display: flex; align-items: center; gap: 12px; }
+.header-time { font-size: 13px; color: var(--text2); font-variant-numeric: tabular-nums; }
+.header-link {
+  font-size: 13px; color: var(--accent); text-decoration: none; font-weight: 500;
+  padding: 6px 12px; border-radius: 8px; background: var(--accent-soft);
+  transition: background 0.15s;
+}
+.header-link:active { background: rgba(37,99,235,0.25); }
+
+/* ─── Dashboard ─── */
+.dashboard {
+  display: none; padding: 16px; padding-bottom: max(100px, calc(80px + var(--safe-bottom)));
+  max-width: 900px; margin: 0 auto;
+}
+.dashboard.visible { display: block; }
+
+/* Grid layout */
+.grid {
+  display: grid; grid-template-columns: 1fr; gap: 16px;
+}
+@media (min-width: 680px) {
+  .grid { grid-template-columns: 1fr 1fr; }
+  .grid .full-width { grid-column: 1 / -1; }
+}
+
+/* ─── Section Card ─── */
+.section {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden;
+}
+.section-header {
+  padding: 14px 16px 10px; display: flex; align-items: center; justify-content: space-between;
+}
+.section-title {
+  font-size: 13px; font-weight: 600; color: var(--text2);
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.section-badge {
+  font-size: 11px; color: var(--text3); background: var(--surface2);
+  padding: 2px 8px; border-radius: 6px;
+}
+.section-body { padding: 0 16px 16px; }
+
+/* ─── Skeleton Loading ─── */
+.skeleton {
+  background: linear-gradient(90deg, var(--surface2) 25%, #252525 50%, var(--surface2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 8px;
+}
+.skeleton-line { height: 14px; margin-bottom: 10px; border-radius: 6px; }
+.skeleton-line:last-child { margin-bottom: 0; width: 60%; }
+.skeleton-block { height: 60px; margin-bottom: 10px; border-radius: 10px; }
+@keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+/* ─── Calendar Timeline ─── */
+.timeline { position: relative; padding-left: 20px; }
+.timeline::before {
+  content: ''; position: absolute; left: 5px; top: 4px; bottom: 4px;
+  width: 1px; background: var(--border2);
+}
+.tl-event { position: relative; padding: 6px 0 14px 0; }
+.tl-event:last-child { padding-bottom: 0; }
+.tl-dot {
+  position: absolute; left: -20px; top: 10px;
+  width: 9px; height: 9px; border-radius: 50%; background: var(--accent);
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.tl-event.allday .tl-dot { background: var(--amber); box-shadow: 0 0 0 1px var(--amber); }
+.tl-event.past .tl-dot { background: var(--text3); box-shadow: 0 0 0 1px var(--text3); }
+.tl-event.current .tl-dot {
+  background: var(--green); box-shadow: 0 0 0 1px var(--green), 0 0 8px rgba(74,222,128,0.4);
+}
+.tl-time { font-size: 11px; color: var(--text2); font-weight: 500; font-variant-numeric: tabular-nums; }
+.tl-title { font-size: 14px; color: #fff; font-weight: 500; margin-top: 2px; line-height: 1.4; }
+.tl-meta { font-size: 12px; color: var(--text3); margin-top: 2px; line-height: 1.4; }
+.tl-now {
+  position: relative; padding: 8px 0 8px 0; display: flex; align-items: center; gap: 8px;
+}
+.tl-now::before {
+  content: ''; position: absolute; left: -20px; top: 50%; transform: translateY(-50%);
+  width: 9px; height: 9px; border-radius: 50%; background: var(--red);
+  box-shadow: 0 0 8px rgba(248,113,113,0.5);
+}
+.tl-now-line {
+  flex: 1; height: 1px; background: var(--red); opacity: 0.4;
+}
+.tl-now-label { font-size: 11px; color: var(--red); font-weight: 600; white-space: nowrap; }
+.calendar-empty {
+  font-size: 13px; color: var(--text3); padding: 12px 0; text-align: center;
+}
+.tomorrow-section .tl-time { color: var(--text3); }
+.tomorrow-section .tl-title { color: var(--text2); }
+.tomorrow-section .tl-dot { background: var(--text3); box-shadow: 0 0 0 1px var(--text3); }
+.tomorrow-section .tl-event.allday .tl-dot { background: rgba(251,191,36,0.5); box-shadow: 0 0 0 1px rgba(251,191,36,0.5); }
+
+/* ─── Email Cards ─── */
+.email-card {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 10px 0; border-bottom: 1px solid var(--border);
+}
+.email-card:last-child { border-bottom: none; }
+.email-avatar {
+  width: 34px; height: 34px; border-radius: 50%; background: var(--surface2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 600; color: var(--text2); flex-shrink: 0;
+}
+.email-avatar.unread { background: var(--accent-soft); color: var(--accent); }
+.email-content { flex: 1; min-width: 0; }
+.email-from {
+  font-size: 13px; font-weight: 500; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.email-from.unread { color: #fff; font-weight: 600; }
+.email-subject {
+  font-size: 13px; color: var(--text2); margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.email-subject.unread { color: var(--text); }
+.email-badge {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+  flex-shrink: 0; margin-top: 4px;
+}
+.email-date { font-size: 11px; color: var(--text3); flex-shrink: 0; margin-top: 2px; }
+
+/* ─── Wiki Grid ─── */
+.wiki-stats {
+  display: flex; gap: 16px; margin-bottom: 14px;
+}
+.wiki-stat {
+  display: flex; flex-direction: column; gap: 2px;
+}
+.wiki-stat-num { font-size: 22px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; }
+.wiki-stat-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.3px; }
+
+.wiki-group { margin-bottom: 14px; }
+.wiki-group:last-child { margin-bottom: 0; }
+.wiki-group-title {
+  font-size: 11px; font-weight: 600; color: var(--text3);
+  text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;
+  padding-bottom: 4px; border-bottom: 1px solid var(--border);
+}
+.wiki-pages { display: flex; flex-wrap: wrap; gap: 6px; }
+.wiki-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 10px; background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 8px; font-size: 12px; color: var(--text); cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.wiki-chip:active { background: var(--accent-soft); border-color: var(--accent); }
+.wiki-chip-icon { font-size: 11px; }
+.wiki-chip.core .wiki-chip-icon { color: var(--accent); }
+.wiki-chip.people .wiki-chip-icon { color: var(--green); }
+.wiki-chip.projects .wiki-chip-icon { color: var(--amber); }
+.wiki-chip.knowledge .wiki-chip-icon { color: var(--purple); }
+.wiki-chip.decisions .wiki-chip-icon { color: var(--red); }
+.wiki-chip.other .wiki-chip-icon { color: var(--text3); }
+.wiki-chip-date { font-size: 10px; color: var(--text3); }
+.wiki-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.wiki-tag {
+  font-size: 10px; color: var(--text3); background: rgba(255,255,255,0.04);
+  padding: 1px 6px; border-radius: 4px;
+}
+
+/* ─── Activity Feed ─── */
+.activity-item {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 8px 0; border-bottom: 1px solid var(--border);
+}
+.activity-item:last-child { border-bottom: none; }
+.activity-icon {
+  width: 28px; height: 28px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; flex-shrink: 0;
+}
+.activity-icon.import { background: var(--green-dim); color: var(--green); }
+.activity-icon.wiki_update { background: var(--accent-soft); color: var(--accent); }
+.activity-icon.conversation { background: var(--purple-dim); color: var(--purple); }
+.activity-icon.other { background: var(--surface2); color: var(--text3); }
+.activity-text {
+  font-size: 13px; color: var(--text); line-height: 1.4; flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.activity-time { font-size: 11px; color: var(--text3); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+
+/* ─── System Bar ─── */
+.system-bar {
+  display: flex; flex-wrap: wrap; gap: 12px; padding: 12px 16px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); margin-bottom: 16px;
+}
+.sys-item { font-size: 12px; color: var(--text3); display: flex; align-items: center; gap: 4px; }
+.sys-item span { color: var(--text2); }
+
+/* ─── Quick Chat ─── */
+.quick-chat {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 40;
+  background: rgba(10,10,10,0.9); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border-top: 1px solid var(--border);
+  padding: 12px 16px; padding-bottom: max(12px, var(--safe-bottom));
+  max-width: 900px; margin: 0 auto;
+}
+@media (min-width: 900px) {
+  .quick-chat { left: 50%; transform: translateX(-50%); }
+}
+.chat-response {
+  max-height: 0; overflow: hidden; transition: max-height 0.3s ease;
+  font-size: 14px; color: var(--text); line-height: 1.6;
+}
+.chat-response.open { max-height: 300px; overflow-y: auto; margin-bottom: 10px; }
+.chat-response-inner {
+  padding: 12px; background: var(--surface2); border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+.chat-response-inner p { margin-bottom: 6px; }
+.chat-response-inner p:last-child { margin-bottom: 0; }
+.chat-response-inner strong { color: #fff; }
+.chat-response-inner code {
+  background: #2a2a2a; padding: 2px 6px; border-radius: 4px; font-size: 13px;
+}
+.chat-input-row { display: flex; gap: 10px; align-items: flex-end; }
+.chat-input-row input {
+  flex: 1; background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 22px; padding: 11px 18px; color: #fff; font-size: 15px;
+  font-family: inherit; outline: none;
+}
+.chat-input-row input::placeholder { color: var(--text3); }
+.chat-input-row input:focus { border-color: var(--accent); }
+.chat-send {
+  width: 40px; height: 40px; border-radius: 50%; border: none;
+  background: var(--accent); color: #fff; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.chat-send:disabled { background: #333; cursor: default; }
+.chat-send:active:not(:disabled) { background: var(--accent-dim); }
+.chat-send svg { width: 16px; height: 16px; }
+
+/* ─── Wiki Modal ─── */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200;
+  display: none; align-items: flex-end; justify-content: center;
+  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+}
+.modal-overlay.open { display: flex; }
+@media (min-width: 680px) { .modal-overlay.open { align-items: center; } }
+.modal {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius) var(--radius) 0 0; width: 100%; max-width: 600px;
+  max-height: 80dvh; display: flex; flex-direction: column;
+  animation: slideUp 0.25s ease;
+}
+@media (min-width: 680px) {
+  .modal { border-radius: var(--radius); max-height: 70dvh; }
+}
+@keyframes slideUp { from{transform:translateY(20px);opacity:0} to{transform:translateY(0);opacity:1} }
+.modal-header {
+  padding: 16px 18px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+}
+.modal-title { font-size: 15px; font-weight: 600; color: #fff; }
+.modal-close {
+  background: none; border: none; color: var(--text2); font-size: 20px;
+  cursor: pointer; padding: 4px 8px; border-radius: 6px;
+}
+.modal-close:hover { background: var(--surface2); color: #fff; }
+.modal-body {
+  padding: 18px; overflow-y: auto; font-size: 14px; line-height: 1.7; color: var(--text);
+  white-space: pre-wrap; word-break: break-word;
+}
+.modal-body h1,.modal-body h2,.modal-body h3 { color: #fff; margin: 16px 0 8px; font-size: 15px; }
+.modal-body ul,.modal-body ol { padding-left: 20px; margin: 8px 0; }
+.modal-body li { margin-bottom: 4px; }
+.modal-body code { background: var(--surface2); padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+.modal-body a { color: #60a5fa; }
+
+/* ─── Refresh indicator ─── */
+.refresh-bar {
+  position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 100;
+  background: transparent;
+}
+.refresh-bar.active {
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: refreshSlide 1s ease infinite;
+}
+@keyframes refreshSlide { 0%{transform:translateX(-100%)} 100%{transform:translateX(100%)} }
+</style>
+</head>
+<body>
+
+<div id="refreshBar" class="refresh-bar"></div>
+
+<!-- Login -->
+<div id="login" class="login">
+  <div class="login-logo">B</div>
+  <h1>Personal Brain</h1>
+  <p>Dashboard</p>
+  <input type="password" id="keyInput" placeholder="Access Key" autocomplete="off">
+  <button onclick="doLogin()">Enter</button>
+</div>
+
+<!-- Wiki Modal -->
+<div id="wikiModal" class="modal-overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modalTitle"></span>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<!-- Header -->
+<div id="header" class="header" style="display:none;">
+  <div class="header-left">
+    <div class="status-dot" id="statusDot"></div>
+    <h1>Personal Brain</h1>
+  </div>
+  <div class="header-right">
+    <span class="header-time" id="headerTime"></span>
+    <a href="/chat" class="header-link">Chat</a>
+  </div>
+</div>
+
+<!-- Dashboard -->
+<div id="dashboard" class="dashboard">
+
+  <!-- System Bar -->
+  <div class="system-bar" id="systemBar">
+    <div class="sys-item">Model: <span id="sysModel">--</span></div>
+    <div class="sys-item">Uptime: <span id="sysUptime">--</span></div>
+  </div>
+
+  <div class="grid">
+    <!-- Today's Schedule -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">Today's Schedule</span>
+        <span class="section-badge" id="todayDate"></span>
+      </div>
+      <div class="section-body" id="todaySchedule">
+        <div class="skeleton skeleton-block"></div>
+        <div class="skeleton skeleton-block"></div>
+      </div>
+    </div>
+
+    <!-- Tomorrow's Schedule -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">Tomorrow</span>
+        <span class="section-badge" id="tomorrowDate"></span>
+      </div>
+      <div class="section-body tomorrow-section" id="tomorrowSchedule">
+        <div class="skeleton skeleton-block"></div>
+      </div>
+    </div>
+
+    <!-- Recent Emails -->
+    <div class="section full-width">
+      <div class="section-header">
+        <span class="section-title">Recent Emails</span>
+        <span class="section-badge" id="emailCount"></span>
+      </div>
+      <div class="section-body" id="emailList">
+        <div class="skeleton skeleton-block"></div>
+        <div class="skeleton skeleton-block"></div>
+        <div class="skeleton skeleton-block"></div>
+      </div>
+    </div>
+
+    <!-- Brain Wiki -->
+    <div class="section full-width">
+      <div class="section-header">
+        <span class="section-title">Brain Wiki</span>
+        <span class="section-badge" id="wikiCount"></span>
+      </div>
+      <div class="section-body" id="wikiSection">
+        <div class="skeleton skeleton-block"></div>
+        <div class="skeleton skeleton-block"></div>
+      </div>
+    </div>
+
+    <!-- Recent Activity -->
+    <div class="section full-width">
+      <div class="section-header">
+        <span class="section-title">Recent Activity</span>
+      </div>
+      <div class="section-body" id="activityList">
+        <div class="skeleton skeleton-block"></div>
+        <div class="skeleton skeleton-block"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Quick Chat -->
+<div id="quickChat" class="quick-chat" style="display:none;">
+  <div class="chat-response" id="chatResponse">
+    <div class="chat-response-inner" id="chatResponseInner"></div>
+  </div>
+  <div class="chat-input-row">
+    <input type="text" id="chatInput" placeholder="Ask Brain..." autocomplete="off">
+    <button class="chat-send" id="chatSend" onclick="sendChat()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<script src="/static/common.js"></script>
+<script>
+let dashData = null;
+let currentAbort = null;
+let clockTimer = null;
+let refreshCtrl = null;
+
+const $ = id => document.getElementById(id);
+
+// ─── Login ───
+function doLogin() {
+  const key = $('keyInput').value.trim();
+  if (!key) return;
+  Brain.setKey(key);
+  showDashboard();
+}
+
+function showDashboard() {
+  $('login').style.display = 'none';
+  $('header').style.display = 'flex';
+  $('dashboard').classList.add('visible');
+  $('quickChat').style.display = 'block';
+  updateClock();
+  if (clockTimer) clearInterval(clockTimer);
+  clockTimer = setInterval(updateClock, 30000);
+  fetchDashboard();
+  if (refreshCtrl) refreshCtrl.stop();
+  refreshCtrl = Brain.pausableInterval(fetchDashboard, 60000);
+}
+
+if (Brain.getKey()) showDashboard();
+
+$('keyInput').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+// ─── Clock ───
+function updateClock() {
+  const now = new Date();
+  $('headerTime').textContent = now.toLocaleString('ja-JP', {
+    month: 'short', day: 'numeric', weekday: 'short',
+    hour: '2-digit', minute: '2-digit'
+  });
+}
+
+// ─── Fetch Dashboard ───
+async function fetchDashboard() {
+  $('refreshBar').classList.add('active');
+  if (currentAbort) currentAbort.abort();
+  currentAbort = new AbortController();
+  try {
+    dashData = await Brain.apiGet('/api/brain/dashboard', { signal: currentAbort.signal });
+    renderAll();
+    $('statusDot').style.background = 'var(--green)';
+  } catch (e) {
+    if (e.name === 'AbortError' || e.message === 'auth') return;
+    console.error('Dashboard fetch error:', e);
+    $('statusDot').style.background = 'var(--red)';
+  } finally {
+    $('refreshBar').classList.remove('active');
+  }
+}
+
+// ─── Render All ───
+function renderAll() {
+  if (!dashData) return;
+  renderSystem();
+  renderCalendar();
+  renderEmails();
+  renderWiki();
+  renderActivity();
+}
+
+// ─── System ───
+function renderSystem() {
+  const sys = dashData.system || {};
+  $('sysModel').textContent = sys.model || '--';
+  $('sysUptime').textContent = sys.uptime || '--';
+}
+
+// ─── Calendar ───
+function renderCalendar() {
+  const cal = dashData.calendar || {};
+  const today = cal.today || [];
+  const tomorrow = cal.tomorrow || [];
+
+  const now = new Date();
+  const todayStr = now.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', weekday: 'short' });
+  const tmrw = new Date(now); tmrw.setDate(tmrw.getDate() + 1);
+  const tmrwStr = tmrw.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', weekday: 'short' });
+
+  $('todayDate').textContent = todayStr;
+  $('tomorrowDate').textContent = tmrwStr;
+
+  $('todaySchedule').innerHTML = renderTimeline(today, true);
+  $('tomorrowSchedule').innerHTML = renderTimeline(tomorrow, false);
+}
+
+function renderTimeline(events, showNow) {
+  if (!events || events.length === 0) {
+    return '<div class="calendar-empty">No events</div>';
+  }
+
+  const now = new Date();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const nowStr = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+
+  // Sort events by time, allday first
+  const sorted = [...events].sort((a, b) => {
+    if (a.allday && !b.allday) return -1;
+    if (!a.allday && b.allday) return 1;
+    return (a.time || '').localeCompare(b.time || '');
+  });
+
+  let html = '<div class="timeline">';
+  let nowInserted = false;
+
+  for (const ev of sorted) {
+    // Insert current time indicator
+    if (showNow && !nowInserted && !ev.allday && ev.time) {
+      const evParts = ev.time.split(':');
+      const evMinutes = parseInt(evParts[0]) * 60 + parseInt(evParts[1] || 0);
+      if (evMinutes > nowMinutes) {
+        html += renderNowIndicator(nowStr);
+        nowInserted = true;
+      }
+    }
+
+    let cls = '';
+    if (ev.allday) {
+      cls = 'allday';
+    } else if (showNow && ev.time) {
+      const evParts = ev.time.split(':');
+      const evMinutes = parseInt(evParts[0]) * 60 + parseInt(evParts[1] || 0);
+      if (evMinutes < nowMinutes - 60) cls = 'past';
+      else if (evMinutes <= nowMinutes && evMinutes >= nowMinutes - 60) cls = 'current';
+    }
+
+    html += '<div class="tl-event ' + cls + '">';
+    html += '<div class="tl-dot"></div>';
+    html += '<div class="tl-time">' + (ev.allday ? 'All Day' : escHtml(ev.time || '')) + '</div>';
+    html += '<div class="tl-title">' + escHtml(ev.title || '') + '</div>';
+
+    const meta = [];
+    if (ev.location) meta.push('@' + ev.location);
+    if (ev.attendees && ev.attendees.length > 0) {
+      meta.push('(' + ev.attendees.map(a => escHtml(a)).join(', ') + ')');
+    }
+    if (meta.length > 0) {
+      html += '<div class="tl-meta">' + meta.join(' ') + '</div>';
+    }
+    html += '</div>';
+  }
+
+  // Insert now indicator at end if not yet inserted
+  if (showNow && !nowInserted) {
+    html += renderNowIndicator(nowStr);
+  }
+
+  html += '</div>';
+  return html;
+}
+
+function renderNowIndicator(timeStr) {
+  return '<div class="tl-now">' +
+    '<span class="tl-now-label">' + timeStr + ' Now</span>' +
+    '<div class="tl-now-line"></div>' +
+    '</div>';
+}
+
+// ─── Emails ───
+function renderEmails() {
+  const emails = dashData.emails || [];
+  const unread = emails.filter(e => e.unread).length;
+  $('emailCount').textContent = unread > 0 ? unread + ' unread' : emails.length + ' recent';
+
+  if (emails.length === 0) {
+    $('emailList').innerHTML = '<div class="calendar-empty">No recent emails</div>';
+    return;
+  }
+
+  $('emailList').innerHTML = emails.slice(0, 10).map(em => {
+    const initials = getInitials(em.from || '');
+    const uCls = em.unread ? ' unread' : '';
+    return '<div class="email-card">' +
+      '<div class="email-avatar' + uCls + '">' + escHtml(initials) + '</div>' +
+      '<div class="email-content">' +
+        '<div class="email-from' + uCls + '">' + escHtml(em.from || 'Unknown') + '</div>' +
+        '<div class="email-subject' + uCls + '">' + escHtml(em.subject || '(no subject)') + '</div>' +
+      '</div>' +
+      (em.unread ? '<div class="email-badge"></div>' : '') +
+      '<div class="email-date">' + formatDate(em.date) + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function getInitials(name) {
+  if (!name) return '?';
+  const clean = name.replace(/<[^>]+>/g, '').trim();
+  const parts = clean.split(/[\s.]+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return clean.slice(0, 2).toUpperCase();
+}
+
+// ─── Wiki ───
+function renderWiki() {
+  const wiki = dashData.wiki || {};
+  const pages = wiki.pages || [];
+  const stats = wiki.stats || {};
+
+  $('wikiCount').textContent = (stats.total_pages || pages.length) + ' pages';
+
+  const categories = {
+    core: { label: 'Core', icon: '\u25C6', pages: [] },
+    people: { label: 'People', icon: '\u25CB', pages: [] },
+    projects: { label: 'Projects', icon: '\u25A1', pages: [] },
+    knowledge: { label: 'Knowledge', icon: '\u25B3', pages: [] },
+    decisions: { label: 'Decisions', icon: '\u2192', pages: [] },
+    other: { label: 'Other', icon: '\u00B7', pages: [] }
+  };
+
+  const coreFiles = ['identity.md', 'style.md', 'thinking.md', 'index.md'];
+
+  for (const p of pages) {
+    let cat = (p.category || '').toLowerCase();
+    if (coreFiles.includes(p.name) || cat === 'core') cat = 'core';
+    else if (p.path && p.path.startsWith('people/') || cat === 'people') cat = 'people';
+    else if (p.path && p.path.startsWith('projects/') || cat === 'projects') cat = 'projects';
+    else if (p.path && p.path.startsWith('knowledge/') || cat === 'knowledge') cat = 'knowledge';
+    else if (p.path && p.path.startsWith('decisions/') || cat === 'decisions') cat = 'decisions';
+    else if (!categories[cat]) cat = 'other';
+    categories[cat].pages.push(p);
+  }
+
+  let html = '';
+
+  // Stats
+  if (stats.total_pages || stats.total_chars) {
+    html += '<div class="wiki-stats">';
+    if (stats.total_pages) {
+      html += '<div class="wiki-stat"><span class="wiki-stat-num">' + stats.total_pages + '</span><span class="wiki-stat-label">Pages</span></div>';
+    }
+    if (stats.total_chars) {
+      const kb = Math.round(stats.total_chars / 1000);
+      html += '<div class="wiki-stat"><span class="wiki-stat-num">' + kb + 'K</span><span class="wiki-stat-label">Characters</span></div>';
+    }
+    html += '</div>';
+  }
+
+  // Groups
+  for (const [key, group] of Object.entries(categories)) {
+    if (group.pages.length === 0) continue;
+    html += '<div class="wiki-group">';
+    html += '<div class="wiki-group-title">' + escHtml(group.label) + ' (' + group.pages.length + ')</div>';
+    html += '<div class="wiki-pages">';
+    for (const p of group.pages) {
+      const name = (p.name || '').replace('.md', '');
+      const updated = p.updated ? formatDate(p.updated) : '';
+      const path = p.path || p.name;
+      html += '<div class="wiki-chip ' + key + '" data-path="' + escHtml(path) + '" data-name="' + escHtml(p.name) + '">';
+      html += '<span class="wiki-chip-icon">' + group.icon + '</span>';
+      html += '<span>' + escHtml(name) + '</span>';
+      if (updated) html += '<span class="wiki-chip-date">' + updated + '</span>';
+      html += '</div>';
+    }
+    html += '</div>';
+
+    // Show tags for first few pages in group
+    const tagsHtml = group.pages
+      .filter(p => p.tags && p.tags.length > 0)
+      .slice(0, 3)
+      .flatMap(p => p.tags)
+      .filter((t, i, arr) => arr.indexOf(t) === i)
+      .slice(0, 8)
+      .map(t => '<span class="wiki-tag">' + escHtml(t) + '</span>')
+      .join('');
+    if (tagsHtml) html += '<div class="wiki-tags">' + tagsHtml + '</div>';
+
+    html += '</div>';
+  }
+
+  $('wikiSection').innerHTML = html || '<div class="calendar-empty">No wiki pages</div>';
+  // Attach delegated click handlers (avoids inline onclick XSS)
+  $('wikiSection').querySelectorAll('.wiki-chip[data-path]').forEach(chip => {
+    chip.addEventListener('click', () => openWiki(chip.dataset.path, chip.dataset.name));
+  });
+}
+
+// ─── Wiki Modal ───
+async function openWiki(path, name) {
+  $('modalTitle').textContent = name || path;
+  $('modalBody').textContent = 'Loading...';
+  $('wikiModal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+
+  try {
+    // path is already url-safe (comes from server)
+    const data = await Brain.apiGet('/api/brain/wiki/' + encodeURIComponent(path));
+    $('modalBody').innerHTML = Brain.renderMarkdown(data.content || '');
+  } catch (e) {
+    if (e.message === 'auth') return;
+    $('modalBody').textContent = 'Failed to load: ' + e.message;
+  }
+}
+
+function closeModal() {
+  $('wikiModal').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+// ─── Activity ───
+function renderActivity() {
+  const activity = dashData.activity || [];
+  if (activity.length === 0) {
+    $('activityList').innerHTML = '<div class="calendar-empty">No recent activity</div>';
+    return;
+  }
+
+  $('activityList').innerHTML = activity.slice(0, 15).map(a => {
+    const type = a.type || 'other';
+    const icons = { import: '\u2193', wiki_update: '\u270E', conversation: '\u2709', other: '\u2022' };
+    const icon = icons[type] || icons.other;
+    const time = a.time ? formatTime(a.time) : '';
+    return '<div class="activity-item">' +
+      '<div class="activity-icon ' + escAttr(type) + '">' + icon + '</div>' +
+      '<div class="activity-text">' + escHtml(a.message || '') + '</div>' +
+      '<div class="activity-time">' + time + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+// ─── Quick Chat ───
+const chatInput = $('chatInput');
+const chatSend = $('chatSend');
+
+chatInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); sendChat(); }
+});
+
+async function sendChat() {
+  const text = chatInput.value.trim();
+  if (!text) return;
+  chatInput.value = '';
+  chatSend.disabled = true;
+
+  const respEl = $('chatResponse');
+  const inner = $('chatResponseInner');
+  inner.textContent = 'Thinking...';
+  respEl.classList.add('open');
+
+  try {
+    const data = await Brain.apiPost('/api/brain/chat', {
+      message: text,
+      session_id: Brain.getSessionId(),
+    });
+    inner.innerHTML = Brain.renderMarkdown(data.reply || '');
+  } catch (e) {
+    if (e.message === 'auth') return;
+    inner.textContent = 'Connection error: ' + e.message;
+  }
+
+  chatSend.disabled = false;
+  chatInput.focus();
+}
+
+// ─── Helpers ───
+const escHtml = Brain.escHtml;
+const escAttr = Brain.escHtml;  // use full HTML-escape for attributes too
+
+function formatDate(dateStr) {
+  if (!dateStr) return '';
+  try {
+    const d = new Date(dateStr);
+    const now = new Date();
+    if (d.toDateString() === now.toDateString()) return 'Today';
+    const yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1);
+    if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+    return d.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' });
+  } catch (e) { return dateStr; }
+}
+
+function formatTime(timeStr) {
+  if (!timeStr) return '';
+  try {
+    const d = new Date(timeStr);
+    const now = new Date();
+    const diffMs = now - d;
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return 'now';
+    if (diffMin < 60) return diffMin + 'm';
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return diffHr + 'h';
+    return d.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' });
+  } catch (e) { return timeStr; }
+}
+
+// ─── Keyboard shortcut: Escape closes modal ───
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+});
+
+// ─── PWA Service Worker ───
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>

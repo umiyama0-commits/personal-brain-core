@@ -1,0 +1,78 @@
+name: tests
+
+# ★2026-06-08 システム評価 Architecture/横断②: 「テストが ~1169 件あるのに push/deploy で
+# 一度も自動実行されない (= gate にならない)」穴を塞ぐ。pure-logic テスト (retrieval_metrics /
+# bm25 / recency / quota / privacy_gate / sanity / ssrf / prompt_version 等) を push 毎に回す。
+# 重い依存 (fastapi / chromadb / google-api / playwright) を要するテストは graceful skip。
+# 注: deploy は Mac Studio auto_deploy 経由で CI とは独立。CI は「壊れたら赤で気付く」signal 層
+# (hard-gate = branch protection は直 push 運用との兼ね合いで海山判断)。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install minimal test deps
+        # 実測で 1169 pass / 63 skip / 0 error になる最小セット (heavy deps はテスト側で graceful skip)
+        run: pip install pytest pytest-asyncio httpx pyyaml python-dateutil numpy
+      - name: run pytest
+        run: python -m pytest tests/ -q
+
+  # ★2026-07-02 監査 P1h: fastapi/main.py 系テストを CI で実際に回す。従来 minimal 依存では
+  # fastapi 未 install → main.py を import する ~4 test file が全 skip (= 検証されないまま deploy)。
+  # 本 job は requirements.txt を入れて main import を伴う test を実行する。full 依存は初導入で
+  # env 差の flake があり得るため continue-on-error (warn-first) — 赤で気付くが main を止めない。
+  # 安定後に hard-gate 化は海山判断 (branch protection と直 push 運用の兼ね合い)。
+  pytest-fastapi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    # ★2026-07-10 (世界基準評価 #3): main.py:43-44 は import 時に LINE_CHANNEL_* を必須化
+    #   (KeyError) + routes.alignment_trial は ALIGNMENT_TRIAL_TOKEN を import 時読込。
+    #   CI で未設定だと import 段階で全 test が error → 7/3 から本 job が恒常赤で signal 死。
+    #   dummy 値を注入して import を通す (テストは必要な secret を各自 monkeypatch する)。
+    env:
+      LINE_CHANNEL_SECRET: ci-dummy-line-secret
+      LINE_CHANNEL_ACCESS_TOKEN: ci-dummy-line-access-token
+      ALIGNMENT_TRIAL_TOKEN: ci-dummy-alignment-trial-token
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: install full deps (requirements.txt + test)
+        run: pip install -r requirements.txt pytest pytest-asyncio
+      - name: run main.py-importing tests (fastapi-gated)
+        # main を import する test が実際に走ることを担保 (skip でなく pass)。
+        # ★2026-07-02 P1h 追記: test_drive_intent_routing / test_drive_search_followup は
+        # 反転済み仕様 (offer_drive_search の廃止→復活) を assert したまま bit-rot しており除外。
+        # triage は backlog (現行 drive-search 仕様に合わせて更新 or 削除)。
+        run: |
+          python -m pytest -q \
+            tests/test_brain_graph_auth.py \
+            tests/smoke/test_routes_helpers.py
+
+  # ★2026-06-08 評価 Architecture: 型チェック gate (pyrightconfig.json で brain_wiki_helpers/ を
+  # basic mode、現状 0 error)。clean な dir を順次 include に足して型チェック面を育てる。
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install pyright + 型解決用 deps
+        run: pip install pyright httpx
+      - name: run pyright (basic, scoped via pyrightconfig.json)
+        run: python -m pyright

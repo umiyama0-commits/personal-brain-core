@@ -1,0 +1,78 @@
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# pre-commit hooks — 軽量チェックのみ
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 初回 setup (各 dev マシンで 1 回):
+#   pip install pre-commit
+#   pre-commit install
+#
+# 動作:
+# - whitespace / yaml / merge-conflict 等の即チェック (commit ブロック級)
+# - black / ruff は当面 手動実行 (pre-commit からは外す、一括 format リスク回避)
+#
+# 手動 format したい時:
+#   pre-commit run black --files <path>   # 指定ファイルだけ
+#   pre-commit run ruff --files <path>
+#
+# 全コード一括 format は別途 PR で慎重に (今は test カバレッジ薄いため避ける)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        exclude: '\.github/'
+      - id: check-added-large-files
+        args: ['--maxkb=3500']   # ★2026-07-01 whitespace 月次refresh の committed base geojson (TH districts 3.2MB / SG planning_areas 2MB=低頻度更新の正当データ) を許容。誤混入ガードは 3.5MB で維持
+      - id: check-merge-conflict
+      - id: debug-statements
+
+  # ─── gitleaks — secret 検出 (★2026-05-23 LEE §4.1) ───
+  # CLAUDE.md / .py / .yaml への平文 API key / password 直書きを commit 段階で blockする。
+  # 検出パターン: sk-(ant|proj|litellm)-* / 社内 password / LOGIN_PASS=" / etc.
+  # 既存 leak は data/brain/raw/notes/ (gitignored) のみで commit に影響しない。
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+        args: ['protect', '--staged', '--redact', '--config=.gitleaks.toml']
+
+  # ─── black / ruff は明示的に呼んだ時だけ実行 (commit hook 自動実行から外す) ───
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+        stages: [manual]
+        args: [--line-length=100]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.0
+    hooks:
+      - id: ruff
+        stages: [manual]
+        args: [--fix, --exit-non-zero-on-fix]
+
+  # ─── analysis/ wiki の public 昇格 lint (★2026-06-10 cross-check S2) ───
+  # 共有 emitter を通さず手動で clone_visibility:public を書く human error を commit 段階で止める。
+  # 分析PJ は機密の可能性が高く、社員 bot への公開は事故源。
+  - repo: local
+    hooks:
+      - id: analysis-visibility-lint
+        name: analysis/ wiki public 昇格 lint (cross-check S2)
+        entry: python3 scripts/lint_analysis_visibility.py
+        language: system
+        pass_filenames: false
+        files: ^data/brain/wiki/analysis/
+
+      # ─── dep-graph 自動再生成 (★2026-07-03 オントロジー: AST から決定論的に) ───
+      # .py 変更 commit 時に docs/review/dep-graph.md を再生成して同 commit に同梱。
+      # グラフが変わる commit は一度 fail → そのまま再 commit で通る (trailing-whitespace と同じ意味論)。
+      - id: dep-graph
+        name: モジュール依存グラフ再生成 (AST, 決定論的)
+        entry: bash -c 'python3 scripts/build_dep_graph.py --quiet && git add docs/review/dep-graph.md'
+        language: system
+        pass_filenames: false
+        files: '\.py$'
+        exclude: '^(tests|data)/'

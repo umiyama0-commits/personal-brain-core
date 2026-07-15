@@ -1,0 +1,39 @@
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# pyproject.toml — Python tooling 設定 (black / ruff / pytest)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# 当面は厳格すぎないルール、徐々に強化
+select = [
+    "E9",     # syntax error
+    "F",      # pyflakes (unused imports, undefined names)
+    "W6",     # deprecation
+]
+ignore = [
+    "E501",   # line too long (既存大量、後で対応)
+    "F401",   # unused imports (テストファイル等で過剰検出回避)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F401", "F811"]  # test の重複・未使用は許容
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short --strict-markers"
+markers = [
+    "smoke: smoke tests (basic functionality)",
+    "integration: integration tests (require external services)",
+    "slow: slow tests (>5s)",
+]
+asyncio_mode = "auto"

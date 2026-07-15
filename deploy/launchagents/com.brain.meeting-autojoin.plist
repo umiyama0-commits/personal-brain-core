@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- meeting_autojoin (web会議 自動参加 → 議事録 → wiki) を launchd で 10 分毎実行
+     (★2026-07-03)。crontab 自動登録が cron 文脈の TCC 権限不足で書き込めないため
+     (failure-log 2026-06-15 と同根、cron_install の loud_fail が検知済)、watchdog と同じく
+     LaunchAgent で登録する。wrapper 側の営業時間 gate は無い (StartInterval 600 で常時) が、
+     script 本体が calendar window で自然に no-op になるため深夜も無害 (calendar API 1 call のみ)。
+     設置: scripts/install_launchagents.sh -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.brain.meeting-autojoin</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>/Users/brain/brain-agent/scripts/meeting_autojoin_cron.sh</string>
+	</array>
+	<key>StartInterval</key>
+	<integer>600</integer>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>/Users/brain/brain-agent/data/brain/meeting_autojoin.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/brain/brain-agent/data/brain/meeting_autojoin.log</string>
+</dict>
+</plist>

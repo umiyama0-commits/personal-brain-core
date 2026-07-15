@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- cron_install を launchd で定期実行 (★2026-06-28)。
+     crontab の自動登録が auto_deploy の cron 起動文脈では TCC 権限不足で `crontab update failed`
+     になり機能しない (failure-log 2026-06-15)。これを恒久回避するため、ログイン GUI セッション
+     (= crontab 書込み権限あり) で走る LaunchAgent から cron_install.sh を 30 分毎に実行し、
+     新規 cron (ai-advisor / core-reflux / personal-snapshot 等) を自動登録する。
+     これで auto_deploy が新 cron を足しても SSH 手動実行が不要になる (cron_install は冪等)。
+     設置: scripts/install_launchagents.sh を SSH/対話セッションから 1 回 (以後ログイン毎に自動ロード)。 -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.brain.cron-install</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>/Users/brain/brain-agent/scripts/cron_install.sh</string>
+	</array>
+	<key>StartInterval</key>
+	<integer>1800</integer>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>/Users/brain/brain-agent/data/brain/cron_install.launchagent.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/brain/brain-agent/data/brain/cron_install.launchagent.log</string>
+</dict>
+</plist>

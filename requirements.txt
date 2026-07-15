@@ -1,0 +1,39 @@
+fastapi==0.115.*
+uvicorn[standard]==0.34.*
+httpx==0.28.*
+redis[hiredis]==5.2.*
+python-multipart==0.0.*
+google-api-python-client==2.*
+google-auth-oauthlib==1.*
+google-auth-httplib2==0.*
+# ★2026-05-26 21:50 緊急 defensive pin: 「docker build 失敗 + bot 古い code」 alert 対応
+# chromadb 1.5.9 (= 2026-05-05 release) で Python 3.12 専用 wheel 不在 (= cp39-abi3 のみ)
+# → 既存 build path で source build に落ち、build-essential 無 slim image で失敗.
+# 1.5.8 (= 2026-04-16 release、安定稼働実績あり) に pin で復旧試行.
+# 真因が別 (= 例: chromadb 以外 / image cache / disk full) なら別途 fix push.
+chromadb==1.5.8
+requests==2.*
+openpyxl==3.*
+pyjwt[crypto]==2.*
+pypdf>=4.0,<6.0
+pdfminer.six>=20231228
+# ★2026-05-19: 画像化 PDF を Vision-OCR fallback するためのページ→画像ラスタライズ
+# (poppler/tesseract 等のシステム依存不要、pure wheel)
+pymupdf>=1.24,<2.0
+# ★2026-05-26: Gemini API 直叩き (= /drive ai の query 拡張 + re-rank)
+# 海山指示 fcbb35a で Phase 2 投入されたが requirements 漏れだったので追加
+google-generativeai>=0.8,<1.0
+# ★2026-05-13: 汎用 URL 取得 + 本文抽出 (readability + bs4 + lxml + trafilatura)
+beautifulsoup4>=4.12,<5.0
+lxml>=5.0,<6.0
+readability-lxml>=0.8.1,<1.0
+trafilatura>=1.12,<2.0
+# ★2026-05-21: OpenTelemetry tracing (subspan 単位の latency 可視化)
+# OTLP exporter は OTEL_EXPORTER_OTLP_ENDPOINT 環境変数が立ってる時だけ機能、
+# 立ってなければ no-op で動作するため production 影響なし。
+opentelemetry-api>=1.27,<2.0
+opentelemetry-sdk>=1.27,<2.0
+opentelemetry-exporter-otlp-proto-grpc>=1.27,<2.0
+# ★2026-06-20: 戦略アナリストの「プレゼン資料」PPTX 生成(scripts/consultant/deck.py)。
+# host cron 実行のため host python にも要(無くても build_pptx は None で graceful、HTML は成立)。
+python-pptx>=0.6,<1.1

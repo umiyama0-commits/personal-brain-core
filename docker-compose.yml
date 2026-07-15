@@ -1,0 +1,135 @@
+version: "3.9"
+services:
+  line-bot:
+    build: .
+    container_name: line-bot
+    restart: always
+    # ★2026-05-24 timezone bug 根本対策 (海山緊急): container TZ を JST に固定。
+    # 旧: TZ 未設定 → UTC default → date.today() が UTC 返す → 売上 query で 1 日古いデータ
+    # 詳細: commit 438762b の brain_wiki.py code 修正と二重化、code 側変更不要な統一 fix。
+    environment:
+      - TZ=Asia/Tokyo
+      # ★2026-07-10 (世界基準評価 S1 観測性): OTel span を Jaeger に流す。tracing.py は本 env が
+      #   立つ時だけ OTLP export (無ければ no-op)。これで p95 14秒の犯人 (retrieval/LLM/scrub) を
+      #   turn 単位でなく span 単位で attribution 可能に (作った span を保全して初めて observability)。
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+    ports:
+      - "8000:8000"
+    env_file: .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      litellm:
+        condition: service_started
+    volumes:
+      - ./data:/app/data
+      - chroma_data:/app/chroma_data
+      - onnx_cache:/root/.cache/chroma
+      # ★2026-05-24 海山指示「MacBook 側で deploy 進める」: docker.sock mount で
+      # /api/admin/redeploy 経由で host docker を MacBook curl から操作可能化。
+      # 注意: docker.sock mount = privileged 操作可能、token 必須 endpoint で gate。
+      - /var/run/docker.sock:/var/run/docker.sock
+      # ★ /app/.git mount: deploy-status endpoint で git HEAD 取得用
+      - ./.git:/app/.git:ro
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm
+    restart: always
+    # ★2026-05-24 TZ JST 統一 (log 時刻整合性のため)
+    environment:
+      - TZ=Asia/Tokyo
+      # ★2026-07-10 (世界基準評価 #5): max_budget を実効化するため Postgres を接続。
+      #   DATABASE_URL があると litellm は起動時に Prisma migration を自動実行し、spend を DB に
+      #   記録して general_settings.max_budget を **hard cap** (超過で 401) として enforce する。
+      #   DB 未到達だと migration 失敗で litellm が上がらない → depends_on: service_healthy で順序保証。
+      - DATABASE_URL=postgresql://litellm:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@litellm-db:5432/litellm
+    volumes:
+      - ./litellm_config.yaml:/app/config.yaml
+    command: ["--config", "/app/config.yaml"]
+    env_file: .env
+    depends_on:
+      litellm-db:
+        condition: service_healthy
+    # ★2026-06-20 世界基準評価 ⑥: 内部 service を LAN 露出させない。host port は loopback のみに bind
+    #   (bot は docker network 'litellm:4000' 経由で到達、host cron は localhost:4000 経由で到達=両立)。
+    ports:
+      - "127.0.0.1:4000:4000"
+
+  # ★2026-07-10 (世界基準評価 #5): litellm 専用 Postgres (spend/budget/virtual key)。
+  #   host port は publish しない = litellm から docker network 'litellm-db:5432' でのみ到達
+  #   (LAN 露出ゼロ、redis/litellm の loopback 方針より更に厳しい最小露出)。password は .env。
+  litellm-db:
+    image: postgres:16-alpine
+    container_name: litellm-db
+    restart: always
+    environment:
+      - TZ=Asia/Tokyo
+      - POSTGRES_DB=litellm
+      - POSTGRES_USER=litellm
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+    volumes:
+      - litellm_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm -d litellm"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # ★2026-07-10 (世界基準評価 S1): trace 保全用 Jaeger (all-in-one、in-memory)。
+  #   UI は 127.0.0.1:16686 のみ (LAN 非露出、海山が bottleneck を見る)。OTLP grpc 4317 は
+  #   docker network 内のみ (line-bot から jaeger:4317 到達、host publish しない)。
+  #   in-memory = 再起動で trace 消える割り切り (latency 分析は直近数時間で十分、永続不要)。
+  jaeger:
+    image: jaegertracing/all-in-one:1.60
+    container_name: jaeger
+    restart: always
+    environment:
+      - TZ=Asia/Tokyo
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "127.0.0.1:16686:16686"   # UI (海山閲覧用)
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: always
+    # ★2026-05-24 TZ JST 統一 (log 時刻整合性のため)
+    environment:
+      - TZ=Asia/Tokyo
+    # ★2026-06-20 世界基準評価 ⑥: loopback bind のみ(LAN 露出排除)。値は .env(§1.1)。
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    # ★2026-06-20 ⑥: requirepass(defense-in-depth)。${REDIS_PASSWORD} は .env から compose 補間。
+    #   bot 側は REDIS_URL=redis://:<pw>@redis:6379 を .env で設定(単一 client = main.py:47)。
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --save
+      - "60 100"
+      - --requirepass
+      - ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
+    healthcheck:
+      # ★2026-06-21 世界基準評価: requirepass 下では無認証 ping が NOAUTH(非0 exit)→ unhealthy で
+      #   cold-start に line-bot が depends_on:redis:healthy で詰まる。NOAUTH も「生存」とみなす(password 不要)。
+      test: ["CMD-SHELL", "redis-cli ping 2>&1 | grep -qE 'PONG|NOAUTH'"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  redis_data:
+  chroma_data:
+  onnx_cache:
+  litellm_pg_data:   # ★2026-07-10 (#5): litellm spend/budget DB

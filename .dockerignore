@@ -1,0 +1,11 @@
+# ★2026-05-12: build context から除外 (ファイル名長すぎ問題 + 不要)
+# data/ は実行時に volume mount するので image に含める必要なし
+data/
+**/.DS_Store
+**/__pycache__/
+**/*.pyc
+.venv/
+node_modules/
+.git/
+.claude/
+*.log

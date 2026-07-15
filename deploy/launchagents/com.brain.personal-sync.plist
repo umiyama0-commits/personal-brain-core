@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Claude.ai の Example Garden 会話だけを personal ドメインへ取り込む (★2026-06-28 海山指示)。
+     Playwright headed (bot 検知回避) は GUI/Aqua セッション必須のため crontab でなく LaunchAgent。
+     日次 05:30 に personal_sync_cron.sh を実行 (RunAtLoad は false=ログイン毎には走らせない、日次のみ)。
+     ログイン済 claude profile (data/brain/.scraper-profiles/claude) を claude_scraper と共有。
+     手動検証: launchctl kickstart gui/$(id -u)/com.brain.personal-sync。
+     設置: scripts/install_launchagents.sh (SSH から 1 回)。 -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.brain.personal-sync</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>/Users/brain/brain-agent/scripts/personal_sync_cron.sh</string>
+	</array>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>5</integer>
+		<key>Minute</key>
+		<integer>30</integer>
+	</dict>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>StandardOutPath</key>
+	<string>/Users/brain/brain-agent/data/brain/personal_sync.launchagent.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/brain/brain-agent/data/brain/personal_sync.launchagent.log</string>
+</dict>
+</plist>
