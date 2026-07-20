@@ -39,6 +39,12 @@ NATION_TOKENS = ("日本", "台湾", "シンガポール", "タイ", "香港", "
 
 # ★cross-check DA (D1): 「実績」は非売上文脈 (採用実績/PJ実績) が多く過剰包含 → 除外
 _SALES_RE = re.compile(r"売り?上げ?|売上|客数|客単価")
+# 「日本」を国名として認識 (日本一/日本語/日本中/日本橋/日本人 等の複合語は除外)
+_JAPAN_NATION_RE = re.compile(r"日本(?![一語中橋人式的海列])")
+# 全社/グローバル明示 (★2026-07-20 海山: うみやまAI は日本デフォルト、全社は明示時のみ)。
+# ★cross-check: 「全店」= 日本 scope の all-store 概念で全社ではない → 除外。「全体」も
+# 「関東エリア全体」等で誤爆するため除外。プロンプトの全社トリガー (全部含む) と語彙を揃える。
+_ALLCO_RE = re.compile(r"全社|全部|グローバル|世界|海外|連結|グループ全体|会社全体")
 _SECTION_RE = re.compile(r"^## (\d{4}-\d{2}-\d{2})", re.MULTILINE)
 _ROW_RE = re.compile(
     r"^\|\s*\d+\s*\|\s*([^|]+?)\s*\|\s*([\d,]+)\s*\|\s*([\d,]+)\s*\|", re.MULTILINE)
@@ -100,8 +106,14 @@ def resolve_range(query: str, today: date) -> tuple[list[date], str] | None:
 # ── 次元とエンティティの検出 ─────────────────────────────
 def detect_dimension(query: str) -> tuple[str, list[str]] | None:
     """(次元 key, 行名フィルタ) を返す。売上系ワード無し or 次元不明なら None。
-    v1 は breakdown 4 次元のみ (全社 totaldaily は表形式が異なるため対象外 = 誤爆より縮退)。"""
+    v1 は breakdown 4 次元のみ (全社 totaldaily は表形式が異なるため対象外 = 誤爆より縮退)。
+
+    ★2026-07-20 海山: うみやまAI は日本事業がデフォルト。scope 明示無しの売上 query は
+    日本 (nation) を default にする (= 全社を勝手に出さない)。「全社/グローバル/海外」明示時は
+    None を返し全社 totaldaily 経路に委ねる。"""
     if not _SALES_RE.search(query):
+        return None
+    if _ALLCO_RE.search(query):  # 全社明示 → 全社 totaldaily 経路 (ここでは注入しない)
         return None
     if "業態" in query:
         return "type", []
@@ -110,9 +122,13 @@ def detect_dimension(query: str) -> tuple[str, list[str]] | None:
     areas = [t for t in AREA_TOKENS if t in query]
     if areas or "エリア" in query:
         return "area", areas
-    if "国別" in query or any(t in query for t in NATION_TOKENS if t != "日本"):
+    # 「日本の売上」型を nation として拾う (日本一/日本語/日本橋 等の非国名は除外)
+    japan_nation = bool(_JAPAN_NATION_RE.search(query))
+    other_nations = [t for t in NATION_TOKENS if t != "日本" and t in query]
+    if "国別" in query or japan_nation or other_nations:
         return "nation", [t for t in NATION_TOKENS if t in query]
-    return None
+    # ★scope 明示無し → 日本 default (海山: 日本以外は聞かれた時のみ)
+    return "nation", ["日本"]
 
 
 # ── セクション抽出 + 決定論集計 ──────────────────────────
@@ -190,6 +206,15 @@ def build_context(query: str, *, today: date | None = None,
         return None
     dim_key, tokens = dim
     dates, label = rng
+    # ★cross-check: 当日のみ (今日/本日) は集計途中 + nationdaily 未生成のことがあり、live の
+    # daily-sales.md に委ねる (honest「データ無し」block で live 回答を抑制しないため None)。
+    if not any(d < (today or date.today()) for d in dates):
+        return None
+    # ★2026-07-20 海山: scope 明示無しは日本 default。その旨を label に明示 (bot が scope 透明化)。
+    scope_defaulted = (dim_key == "nation" and tokens == ["日本"]
+                       and not _JAPAN_NATION_RE.search(query or "") and "国別" not in (query or ""))
+    if scope_defaulted:
+        label = f"{label}・日本 (scope 指定なし = 日本 default、全社/海外は聞かれた時のみ)"
     if knowledge_dir is None:
         return None
     path = Path(knowledge_dir) / HISTORY_FILES[dim_key]
