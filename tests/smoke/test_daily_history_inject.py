@@ -74,7 +74,12 @@ def test_dimension_detection():
     assert dhi.detect_dimension("先週の業態別売上") == ("type", [])
     assert dhi.detect_dimension("台湾の先週の売上") == ("nation", ["台湾"])
     assert dhi.detect_dimension("先週の天気") is None          # 売上系ワード無し
-    assert dhi.detect_dimension("日本一の売上を目指す") is None  # 「日本」単独は trigger しない
+    # scope 明示無しの売上は default 日本 (全社/他国は明示時のみ)
+    assert dhi.detect_dimension("先週の売上") == ("nation", ["日本"])
+    assert dhi.detect_dimension("昨日の全社の売上") is None      # 全社明示 → 全社経路
+    # 「日本一…」は default 日本 に落ちるが、日付が無いので注入されない
+    assert dhi.detect_dimension("日本一の売上を目指す") == ("nation", ["日本"])
+    assert dhi.build_context("日本一の売上を目指す", knowledge_dir=None) is None  # 日付無し=注入なし
 
 
 # ── 注入ブロック ─────────────────────────────────────────

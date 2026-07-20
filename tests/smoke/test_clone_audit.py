@@ -222,8 +222,12 @@ def test_list_recent_unrated_filters_audited(brain_root):
     importlib.reload(clone_history)
     importlib.reload(clone_audit)
 
+    import time
     clone_history.append("u_a", "user", "test", user_display="A")
     clone_history.append("u_a", "assistant", "reply_already_audited", user_display="A")
+    # ★秒精度 timestamp の衝突回避: list_recent_unrated は ts で assistant を dedup するため、
+    #   高速環境で 2 reply が同一秒になると一方が落ちる (別 reply の取りこぼし)。
+    time.sleep(1.1)
     clone_history.append("u_b", "user", "test2", user_display="B")
     clone_history.append("u_b", "assistant", "reply_pending_audit", user_display="B")
 
