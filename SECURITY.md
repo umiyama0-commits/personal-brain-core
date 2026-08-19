@@ -4,7 +4,9 @@
 
 If you find personal data, credentials, or company-confidential material that
 survived the sanitization pass in this repository, please report it privately
-rather than opening a public issue: **umiyama0@gmail.com**.
+rather than opening a public issue — use GitHub's **Report a vulnerability**
+button under the Security tab of this repository, which opens a private
+advisory visible only to the maintainer.
 
 That includes partially masked values. A mask that keeps the first and last
 characters still leaks length and generation pattern — we treat those as leaks,
