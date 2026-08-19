@@ -60,6 +60,10 @@ scar.
   scrub) that keeps private material out of public-facing responses.
 - **Alignment / persona** — voice and form based interviews distilled into a
   persona, with coverage tracking and gap-targeted questioning.
+- **Knowledge graph view** — an Obsidian-style map of the whole knowledge base
+  (`brain_graph.py`), coloured by memory layer and recency, with the surfaced
+  node count controlled by a percentile so a few thousand files stay readable.
+  Access tier is applied **while the graph is built**, not while it is drawn.
 - **Self-improvement loops** — nightly regression, hallucination checks,
   post-hoc fact verification, memory hygiene, and propose-only auto-edits.
 
@@ -72,6 +76,7 @@ scar.
 | `brain_index.py` | Chroma vector index |
 | `privacy_gate.py` | 3-stage privacy filter |
 | `brain_commands.py` | bot command handlers (`/brain`, `/teach`, `/clone`, …) |
+| `brain_graph.py` | knowledge-graph builder + embedded HTML viewer |
 | `services/`, `routes/`, `tasks/` | app services, API routers, background tasks |
 | `clone_*.py`, `alignment_interview.py` | clone history/memory/feedback + persona interviews |
 | `scripts/` | scrapers, quality loops, cron infra, extractors |
@@ -107,6 +112,7 @@ LINE Works credentials, etc.). Nothing in this repo contains real secrets.
 | deciding whether this is relevant at all | the section above, then `docs/porting/00_CONCEPT_DECK_FOR_CEO.md` |
 | porting it to another person / company | `docs/porting/GENERIC_VS_SPECIFIC.md` — what is reusable vs what must be replaced |
 | standing it up from zero | `docs/porting/SETUP_FROM_ZERO.md` |
+| building a graph view of your own notes | `brain_graph.py` — `build_graph_data()` is the whole algorithm; its `admin` flag and `surface_pct` are the two decisions that matter |
 | interested in the privacy model | `privacy_gate.py`, `brain_wiki_helpers/visibility.py`, `docs/porting/PRIVACY_COMPLIANCE.md` |
 
 ## License

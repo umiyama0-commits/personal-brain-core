@@ -112,6 +112,24 @@ figures in the generated text against it.
 
 Multiple layers because each one has failed at least once.
 
+### 3.4 The graph is filtered before it exists
+
+The knowledge base can be viewed as a graph — nodes coloured by memory layer,
+sized by weight, dimmed by age, with links drawn from wiki references and from a
+sidecar file of typed edges. It is the fastest way to see what the brain has
+become: which areas are dense, which are isolated, what has gone stale.
+
+The part worth copying is where the access decision happens. `build_graph_data()`
+takes an `admin` flag that defaults to false, and a non-admin build **omits
+private nodes entirely** — not hidden in the rendered view, but never converted
+into nodes, so their titles, tags, and paths never reach the JSON. Filtering at
+render time would have shipped the metadata to the client and relied on the
+client not showing it.
+
+A second parameter, `surface_pct`, decides what fraction of nodes is drawn at
+all. Past a few thousand files a complete graph is unreadable, so the rest is
+folded away by weight rather than dropped.
+
 ## 4. A single turn, end to end
 
 1. Webhook receives a message; the sender determines which persona answers.
