@@ -103,6 +103,7 @@ LINE Works credentials, etc.). Nothing in this repo contains real secrets.
 
 | If you are… | Read |
 |---|---|
+| understanding how the system works | **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — end to end, with a diagram |
 | deciding whether this is relevant at all | the section above, then `docs/porting/00_CONCEPT_DECK_FOR_CEO.md` |
 | porting it to another person / company | `docs/porting/GENERIC_VS_SPECIFIC.md` — what is reusable vs what must be replaced |
 | standing it up from zero | `docs/porting/SETUP_FROM_ZERO.md` |
