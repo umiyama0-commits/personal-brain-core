@@ -2794,7 +2794,7 @@ class BrainWiki:
         # 「今日」「本日」はあえて historical lookup に追加しない。
         # 今日のデータは daily-sales.md / daily-stores.md (core retrieval) に live で
         # 入っているため、history-totaldaily.md の今日行 (= 早朝 23:00 cron 時点の partial) を
-        # 加えると bot が partial 値を主答えにしてしまうバグがあった (4/28: 578,754円 vs live 55,666,532円)。
+        # 加えると bot が partial 値を主答えにしてしまうバグがあった (例: 部分値 578,754 円 vs live の全体値)。
         # → 今日は core retrieval に任せる、history は触らない。
         # 「N 日前」(1〜30) — 「3日前」「7日前」等を許容
         for m in re.finditer(r"(\d{1,2})\s*日\s*前", query):
@@ -3203,7 +3203,7 @@ class BrainWiki:
                 day_hits: dict[tuple[int, int, int], tuple[int, int]] = {}
 
                 def _parse_row(line: str) -> tuple[Optional[tuple[int, int, int]], int, int]:
-                    # e.g. "| 2024-05-01 | (水) | 164,018,766円 | 9,469 |"
+                    # e.g. "| 2099-05-01 | (水) | 123,456,789円 | 9,999 |"
                     m = re.match(
                         r"\|\s*(\d{4})-(\d{2})-(\d{2})\s*\|[^|]*\|\s*([\d,]+)\s*円\s*\|\s*([\d,]+)",
                         line,
