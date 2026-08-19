@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from clone_improve_lib import line_push  # noqa: E402
+from clone_improve_lib import line_push, line_push_digest  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 HISTORY_DIR = ROOT / "data" / "brain" / "clone_history"
@@ -97,7 +97,7 @@ def run(push: bool = False, show_all: bool = False) -> dict:
     msg = "\n".join(lines)
     if push:
         try:
-            line_push(msg)
+            line_push_digest(msg, "gap検知")
         except Exception:
             pass
         STATE_FILE.write_text(json.dumps({"done": [g["key"] for g in gaps]}, ensure_ascii=False),

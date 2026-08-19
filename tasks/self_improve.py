@@ -30,7 +30,7 @@ SELF_IMPROVE_STATE_FILE = Path(
 
 # main.py 由来 env / config (引数 DI でなく env 直読みで OK、起動時に固定)
 LITELLM_URL = os.getenv("LITELLM_URL", "http://litellm:4000")
-LITELLM_KEY = os.getenv("LITELLM_MASTER_KEY", "")  # ★平文 default 禁止 (社内レビュー §3.1)
+LITELLM_KEY = os.getenv("LITELLM_MASTER_KEY", "")  # ★平文 default 禁止 (LEE §3.1)
 ALIGNMENT_TARGET_USER = os.getenv("ALIGNMENT_TARGET_USER", "")
 
 

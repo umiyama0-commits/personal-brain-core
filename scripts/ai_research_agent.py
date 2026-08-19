@@ -65,7 +65,7 @@ PROPOSALS_FILE = RESEARCH_DIR / "proposals.jsonl"
 # scripts/ 配下 module 取込
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
-    from clone_improve_lib import call_llm, line_push, supervisor_model  # type: ignore
+    from clone_improve_lib import call_llm, line_push, line_push_digest, supervisor_model  # type: ignore
 except Exception as e:
     logger.warning(f"clone_improve_lib import failed: {e}")
 
@@ -517,7 +517,7 @@ async def run(
     if not no_push:
         try:
             push_text = build_push_summary(digest, today, len(proposals))
-            ok = line_push(push_text)
+            ok = line_push_digest(push_text, "AI研究")
             summary["line_pushed"] = ok
         except Exception as e:
             logger.warning(f"line_push failed: {e}")

@@ -40,6 +40,7 @@ REQUIRED_CRONS=(
 "30 3 * * * $REPO_ROOT/scripts/clone_cron.sh regression >> $LOG_DIR/cron.log 2>&1"
 "45 3 * * * $REPO_ROOT/scripts/clone_cron.sh hallucination >> $LOG_DIR/cron.log 2>&1"
 "50 3 * * * $REPO_ROOT/scripts/clone_cron.sh monitor-daily >> $LOG_DIR/cron.log 2>&1"
+"40 4 * * * $REPO_ROOT/scripts/clone_cron.sh ingest-audit >> $LOG_DIR/cron.log 2>&1"
 "*/5 * * * * $REPO_ROOT/scripts/clone_cron.sh uptime-monitor >> $LOG_DIR/cron.log 2>&1"
 # ★2026-06-15: host_docker_watchdog は crontab でなく LaunchAgent (com.brain.docker-watchdog) で
 #   登録する — cron 起動文脈は crontab 書込み(TCC)も open -a Docker(GUI)も不可なため。
@@ -54,6 +55,8 @@ REQUIRED_CRONS=(
 "0 5 * * 0 $REPO_ROOT/scripts/clone_cron.sh golden-eval >> $LOG_DIR/cron.log 2>&1"
 "*/30 * * * * $REPO_ROOT/scripts/clone_cron.sh response-quality >> $LOG_DIR/cron.log 2>&1"
 "0 9 * * * $REPO_ROOT/scripts/clone_cron.sh cost-daily >> $LOG_DIR/cron.log 2>&1"
+# ★2026-07-20 Umiyama AI Agent 正式化: info 系通知の 1日2回まとめ配信 (空なら無音)
+"0 10,19 * * * $REPO_ROOT/scripts/clone_cron.sh notify-digest >> $LOG_DIR/cron.log 2>&1"
 "5 9,21 * * * $REPO_ROOT/scripts/clone_cron.sh credit-check >> $LOG_DIR/cron.log 2>&1"
 "0 9 * * 1 $REPO_ROOT/scripts/clone_cron.sh weekly >> $LOG_DIR/cron.log 2>&1"
 "30 9 * * 1 $REPO_ROOT/scripts/clone_cron.sh ai-research >> $LOG_DIR/cron.log 2>&1"
@@ -166,6 +169,7 @@ PATTERNS=(
 "$REPO_ROOT/scripts/clone_cron.sh regression"
 "$REPO_ROOT/scripts/clone_cron.sh hallucination"
 "$REPO_ROOT/scripts/clone_cron.sh monitor-daily"
+"$REPO_ROOT/scripts/clone_cron.sh ingest-audit"
 "$REPO_ROOT/scripts/clone_cron.sh uptime-monitor"
 "$REPO_ROOT/scripts/clone_cron.sh eval-baseline"
 "$REPO_ROOT/scripts/clone_cron.sh privacy-review"
@@ -174,6 +178,7 @@ PATTERNS=(
 "$REPO_ROOT/scripts/clone_cron.sh golden-eval"
 "$REPO_ROOT/scripts/clone_cron.sh response-quality"
 "$REPO_ROOT/scripts/clone_cron.sh cost-daily"
+"$REPO_ROOT/scripts/clone_cron.sh notify-digest"
 "$REPO_ROOT/scripts/clone_cron.sh credit-check"
 "$REPO_ROOT/scripts/clone_cron.sh weekly"
 "$REPO_ROOT/scripts/clone_cron.sh ai-research"

@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # scripts/ sibling import
 
 from claude_personal_sync import (  # noqa: E402  同じ要約・personal 書込・marker を再利用
-    EXAMPLE_RE, abstract_conversation, is_example_title, write_personal_abstract,
+    PERSONAL_RE, abstract_conversation, is_example_title, write_personal_abstract,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -72,7 +72,7 @@ def is_example_conv(conv: dict) -> bool:
     """title 合致、または本文のどれかに Example marker(export は意図共有なので content も見る)。"""
     if is_example_title(conv.get("title", "")):
         return True
-    return any(EXAMPLE_RE.search(m.get("content", "")) for m in conv.get("messages", []))
+    return any(PERSONAL_RE.search(m.get("content", "")) for m in conv.get("messages", []))
 
 
 def _load_state() -> set:
@@ -101,7 +101,7 @@ async def run(export_path: Path, *, dry_run: bool = False, llm=None) -> dict:
         if c["id"] in done:
             continue
         pname = _project_name(raw, projects)
-        if EXAMPLE_RE.search(pname or "") or is_example_conv(c):   # PJ名 Example=全部 / fallback=title・content
+        if PERSONAL_RE.search(pname or "") or is_example_conv(c):   # PJ名 Example=全部 / fallback=title・content
             example.append(c)
     logger.info(f"全{len(convos)}会話中 Example(PJ+fallback)未取込 {len(example)} 件")
     written = []

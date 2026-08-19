@@ -9,8 +9,8 @@ source "$(dirname "$0")/cron_env.sh"
 REPO_ROOT="${REPO_ROOT:-/Users/brain/brain-agent}"
 cd "$REPO_ROOT" || { echo "ERROR: cd $REPO_ROOT failed"; exit 2; }
 
-echo "$(date): ===== personal_sync start ====="
+echo "$(date): ===== example_sync start ====="
 python3 scripts/claude_personal_sync.py --count 20
 RC=$?
-echo "$(date): ===== personal_sync done (rc=$RC) ====="
+echo "$(date): ===== example_sync done (rc=$RC) ====="
 exit $RC

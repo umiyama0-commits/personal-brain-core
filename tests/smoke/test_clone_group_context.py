@@ -51,7 +51,7 @@ def test_save_and_load_roundtrip(brain_root):
 営業本部 review group、メンバー 12 名
 
 ## Ongoing Topics
-- 海外出店 (2026-05-15〜)
+- 龍仁出店 (2026-05-15〜)
 
 ## Recent Events
 - 2026-05-23: 競合動向報告
@@ -71,7 +71,7 @@ def test_save_and_load_roundtrip(brain_root):
     assert fm["turn_count"] == "5"
     assert fm["member_count"] == "12"
     assert "Group Profile" in loaded_body
-    assert "海外出店" in loaded_body
+    assert "龍仁出店" in loaded_body
 
 
 @pytest.mark.smoke

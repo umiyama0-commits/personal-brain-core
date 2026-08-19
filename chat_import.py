@@ -129,7 +129,7 @@ def _infer_space_variant_senders(lines: list[str]) -> list[str]:
     sender は空白を含み得る ("Take Umiyama" / "MCPI H.Fukuda" / "長尾貴之(Takky)") ため
     区切りが曖昧 → 2 パス方式: 全メッセージ行の先頭 1..3 token prefix の出現頻度を数え、
     「拡張 prefix が元の頻度の 8 割以上を保持する限り伸ばす」で本名を決める
-    (= "Take" は常に "Take Umiyama" が続くので 2 token、"aida" の次語はバラけるので 1 token)。
+    (= "Take" は常に "Take Umiyama" が続くので 2 token、"nakatani" の次語はバラけるので 1 token)。
     返り値は長い順 (parse 時に最長一致させる)。
     """
     from collections import Counter

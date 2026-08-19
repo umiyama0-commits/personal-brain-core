@@ -161,6 +161,6 @@ def test_strip_preserves_text_outside_tags():
 def test_mention_email_user_id(monkeypatch):
     """userId に email 形式 (公式仕様で email 受付) でも検出。"""
     from lineworks_bot import is_mentioned
-    monkeypatch.setenv("LW_BOT_USER_ID", "bot@owndays.co.jp")
-    assert is_mentioned('<m userId="bot@owndays.co.jp">うみやまAI</m> hello') is True
+    monkeypatch.setenv("LW_BOT_USER_ID", "bot-account@example.co.jp")
+    assert is_mentioned('<m userId="bot-account@example.co.jp">うみやまAI</m> hello') is True
     assert is_mentioned('<m userId="other@owndays">他人</m> mention') is False

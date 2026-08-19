@@ -25,6 +25,7 @@ import asyncio
 import contextlib
 import fcntl
 import hashlib
+import json
 import logging
 import os
 import re
@@ -201,21 +202,92 @@ DISTILL_PROMPT = """あなたは海山丈司の Personal Brain の「還流」�
 ]}}"""
 
 
+DIGEST_STATE = ROOT / "data" / "brain" / ".reflux_input_digest.json"
+
+
+_RUN_FAILURES: list[str] = []
+# ★§1.15 Reviewer M1: digest を distill() 内 (LLM 成功直後) に保存すると、--dry-run が
+# 「LLM は成功、queue には入れない」ので **その候補が入力不変の間ずっと queue に入らなくなる**
+# (静かな恒久喪失)。queue 投入を見届けてから run() 側で確定させる。
+_PENDING_DIGESTS: dict[str, str] = {}
+
+
+def _note_failure(domain: str, detail: str) -> None:
+    """蒸留失敗を run 単位で集約 (§1.18: 記録は 1 実行 1 箇所 = loud_fail は run() 末尾で 1 回)。"""
+    _RUN_FAILURES.append(f"{domain}: {detail}")
+
+
+def _input_digest(domain: str, memory: str, core: str = "") -> str:
+    """蒸留入力の指紋。
+
+    **memory だけでなく core と prompt template も含める**。承認 (`/reflux ok`) は Core を
+    書き換えるので、memory 不変でも「Core に既に有るか」の判断材料が変わる = 再蒸留すべき。
+    prompt を含めるのは、蒸留方針を変えた時に古い skip が効き続けないようにするため。
+    """
+    h = hashlib.sha256()
+    for part in (memory, core, DISTILL_PROMPT):
+        h.update(hashlib.sha256(part.encode("utf-8", "ignore")).digest())
+    return h.hexdigest()[:16]
+
+
+def _load_digests() -> dict:
+    try:
+        return json.loads(DIGEST_STATE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_digest(domain: str, digest: str) -> None:
+    try:
+        d = _load_digests()
+        d[domain] = digest
+        DIGEST_STATE.parent.mkdir(parents=True, exist_ok=True)
+        DIGEST_STATE.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    except Exception as e:
+        logger.warning(f"digest 保存失敗 (非致命): {e}")
+
+
 async def distill(domain: str, llm=None) -> list[dict]:
     llm = llm or call_llm
     memory = _domain_memory(domain)
     if not memory or len(memory) < 200:
         return []
+    # ★2026-08-03 実測: 入力が前回と 1 バイトも変わっていないのに毎晩 LLM に投げていた。
+    # 特に personal/example-garden は個人 LINE 全文 (630 メッセージ・第三者2名の発話込み) を
+    # 36,000 字そのまま **年 365 回** Anthropic へ送っていた (実測 47,935 prompt tok/日 が
+    # 8/10 以降ずっと同値)。同じ入力から新しい候補は出ないので、送信自体を止める。
+    # = コストだけでなく「外部に出る回数」を 365 → 1 に減らす privacy 施策でもある。
+    _core = _core_text()[:24_000]
+    _dg = _input_digest(domain, memory, _core)
+    if _load_digests().get(domain) == _dg:
+        logger.info(f"distill {domain}: 入力が前回と同一 → skip (外部送信なし)")
+        return []
     prompt = DISTILL_PROMPT.format(
-        domain=domain, memory=memory[:MEMORY_CAP], core=_core_text()[:24_000],
+        domain=domain, memory=memory[:MEMORY_CAP], core=_core,
         maxn=MAX_CANDIDATES_PER_DOMAIN)
     try:
         raw = await llm(prompt, model="smart", max_tokens=2500, temperature=0.2)
         data = extract_json(raw)
     except Exception as e:
         logger.warning(f"distill {domain} failed: {type(e).__name__}: {e}")
+        _note_failure(domain, f"{type(e).__name__}: {e}")
         return []
-    cands = data.get("candidates", []) if isinstance(data, dict) else []
+    # ★§1.15 DA: digest を「LLM が例外を出さなかった」だけで保存すると、LLM が list を返した /
+    # candidates キーが無い / 全 principle が空 といった **例外にならない外れ応答** の夜に
+    # digest が焼き付き、入力が静的なドメイン (example 等) は永久に蒸留されなくなる。
+    # 「候補 0 件」は正当な答え (質>量、0 件で良い と prompt が明示) なので skip 対象に含めるが、
+    # **応答の形が壊れている場合は skip 対象にしない** = 次回やり直す。
+    if not isinstance(data, dict) or "candidates" not in data:
+        logger.warning(f"distill {domain}: 応答形式が不正 (candidates 無し) → digest 記録せず再試行")
+        _note_failure(domain, "malformed response (no candidates key)")
+        return []
+    _PENDING_DIGESTS[domain] = _dg   # 記録は run() が queue 投入まで見届けてから (M1)
+    cands = data.get("candidates", [])
+    if not isinstance(cands, list):
+        logger.warning(f"distill {domain}: candidates が list でない → digest 記録せず再試行")
+        _PENDING_DIGESTS.pop(domain, None)
+        _note_failure(domain, "malformed response (candidates not a list)")
+        return []
     out = []
     for c in cands[:MAX_CANDIDATES_PER_DOMAIN]:
         p = (c.get("principle") or "").strip()
@@ -261,7 +333,10 @@ def _dedup(cands: list[dict]) -> list[dict]:
 async def run(*, dry_run: bool = False, llm=None, push_fn=None) -> dict:
     push_fn = push_fn or line_push
     all_new: list[dict] = []
-    for domain in list_domains():
+    _RUN_FAILURES.clear()
+    _PENDING_DIGESTS.clear()
+    _domains = list_domains()
+    for domain in _domains:
         cands = await distill(domain, llm=llm)
         fresh = _dedup(cands)
         all_new.extend(fresh)
@@ -270,16 +345,35 @@ async def run(*, dry_run: bool = False, llm=None, push_fn=None) -> dict:
     if dry_run:
         for c in all_new:
             print(f"[{c['id']}] ({c['source_domain']}/{c['type']}) {c['principle']}")
+        # digest は保存しない = 次の本番 run で必ず蒸留し直す (M1: dry-run が候補を消さない)
         return {"ok": True, "dry_run": True, "candidates": len(all_new)}
     now = datetime.now().isoformat(timespec="seconds")
     with _queue_lock():
         for c in all_new:
             append_jsonl(QUEUE, {**c, "status": "pending", "ts": now})
+    # queue 投入を見届けてから digest を確定 (append_jsonl が落ちた domain は次回も再蒸留)
+    for _d, _v in _PENDING_DIGESTS.items():
+        _save_digest(_d, _v)
     if all_new:
         try:
             push_fn(build_push(all_new))
         except Exception as e:
             logger.warning(f"reflux push failed: {e}")
+            _note_failure("push", f"{type(e).__name__}: {e}")
+    # ★2026-08-03 §1.18 配線: 全ドメインが例外で落ちても従来は log 1 行で無音だった
+    # (= 還流が何日止まっても気付けない)。静かな日 (入力同一で skip = 失敗ゼロ) は成功扱いに
+    # して alert 疲れを避け、**失敗が 1 つでも出た run は ok=False** にする。
+    # ★§1.15 Reviewer M3: 当初 `_RUN_FAILURES and not all_new` にしていたが、push は
+    # all_new 非空の時しか走らないので **push 失敗は永久に streak に乗らない**デッド配線だった
+    # (§1.18 は「配信」の silent 死を明示対象にしている)。
+    try:
+        from clone_improve_lib import loud_fail
+        _ok = not _RUN_FAILURES
+        loud_fail("reflux", _ok,
+                  "; ".join(_RUN_FAILURES[:4]) or "全ドメインの蒸留に失敗",
+                  threshold=3, cooldown_h=24)
+    except Exception as e:
+        logger.warning(f"loud_fail 記録失敗 (非致命): {e}")
     return {"ok": True, "candidates": len(all_new), "queued": [c["id"] for c in all_new]}
 
 

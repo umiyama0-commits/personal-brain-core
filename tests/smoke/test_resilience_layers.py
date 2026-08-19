@@ -23,7 +23,7 @@ def test_clone_respond_public_logs_fallback_to_bot_events():
     src = (REPO / "brain_wiki.py").read_text(encoding="utf-8")
 
     # except 節周辺を抽出
-    idx = src.find('return "お休みをいただいてます。しばらく経ってから再度試して。"')
+    idx = src.find('いま一時的に応答できない状態')
     assert idx > 0, "fallback 文言が見つからない"
     # その近傍 (前 700 char) に log_bot_event がある
     window = src[max(0, idx - 700):idx]
@@ -37,7 +37,7 @@ def test_clone_respond_public_logs_fallback_to_bot_events():
 def test_clone_respond_public_logging_failure_is_swallowed():
     """logging 自体が失敗しても本流 (fallback 文言 return) は止まらない (= silent except)。"""
     src = (REPO / "brain_wiki.py").read_text(encoding="utf-8")
-    idx = src.find('return "お休みをいただいてます。しばらく経ってから再度試して。"')
+    idx = src.find('いま一時的に応答できない状態')
     window = src[max(0, idx - 700):idx]
     # log_bot_event 周辺に try/except があり、Exception を pass している
     # (= logging 失敗で fallback 返答が遅延・失敗しない)

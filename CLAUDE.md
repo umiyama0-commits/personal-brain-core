@@ -1,5 +1,13 @@
 # Personal Brain — Claude Code Instructions
 
+> **Note for readers of the public export**: this file is the working rulebook of the
+> private repository, included here because it is the most honest description of how the
+> system is actually operated. It references documents that are **not** part of this
+> export — `docs/review/ARCHITECTURE.md`, `docs/runbook.md`, `docs/failure-log.md`, and
+> `docs/decisions/*` — because they contain incident detail and business specifics.
+> Those links will not resolve here. The porting guides under `docs/porting/` are the
+> public substitute, and the README summarises the lessons the failure log carries.
+
 > OWNDAYS CEO 海山丈司の Personal Brain (LINE Bot + 自己複製基盤 + 売上 retrieval) 開発時のルール。
 > 詳細設計は `docs/review/ARCHITECTURE.md`、運用手順は `docs/runbook.md`、過去事故は `docs/failure-log.md`。
 > 本ファイルは Claude が守るルールのみ (200-300 行)。
@@ -10,6 +18,17 @@
 
 1.1 **Secret は os.getenv() 経由のみ**。`.py` / `.md` / `.yaml` への平文直書き禁止 (gitleaks で block)。`.env` を介して読む。
 gitleaks は pre-commit hook で fail-closed 実行 (★2026-07-02 P1f 実効化: それまで config のみで hook 未設置 = inert)。hook 実体 `scripts/git_hooks/pre-commit` (版管理)、設置 `scripts/install_git_hooks.sh` (cron_install.sh が毎 cycle 冪等再設置 = 再 clone でも復活)。binary 不在も commit 停止 (緊急 bypass: `GITLEAKS_BYPASS=1`)。
+1.1b **秘密は「値を1文字も書かない」— 部分マスクも禁止** (★2026-08-18 実害)。
+先頭と末尾だけ残す伏せ方は安全に見えて **長さ・先頭末尾・生成の癖が残る**。この形で書いた作業メモが
+公開 repo に 1 ヶ月出ていた (gitleaks の allowlist が `^docs/.*\.md$` で **docs を丸ごと除外**していたため
+無検出。当該 allowlist は撤去済)。秘密に触れる時は **env 変数名だけで指す** (「`OWNDAYS_MOBILE_PASS` を rotate」)。
+docs / コメント / commit message / リマインダー文面 / チャットのいずれにも値・断片を書かない。
+機械的な防御は 3 層: ① gitleaks の `masked-credential-fragment` / `password-label-with-value`、
+② 取り込み最上流の `privacy_gate._CRED_RE` (gate1_credential で BLOCK、理由に値を載せない)、
+③ 公開 export の `scripts/public_export.py` (検知したら書き出さず異常終了)。
+※②は導入時の実データ走査 (38,310 行) で **既存 raw notes の平文パスワード 4 件**を検出した =
+過去分は別途スクラブが要る (取り込み済みのものは遡って消えない)。
+
 1.2 **新規モジュール追加時**: §2 Key Files 表 + `tests/` + (cron なら `scripts/cron_install.sh`) を同時更新。
 1.3 **destructive command** (`rm -rf` / `git push --force` / `drop table` / `chroma_data` wipe) は海山の Push 承認後にのみ実行。
 
@@ -99,8 +118,9 @@ knowledge・dashboard・search)・`/mcp/brain`・社員クローン・公開 LIN
 private ノードの title/tags/path を JSON 露出」穴を封鎖 = graph も operator endpoint #2 と可視性一貫化。
 判定は sibling endpoint と同じ `== "private"`、fail-safe = frontmatter 無し / clone_visibility 未設定も
 private 扱いで build から除外)。source-level + build test で固定。
-**残存リスク**: URL クエリ経由の admin key は取り扱い注意 (ログ等に残りうる)。漏洩疑い時は
-`BRAIN_EXTENSION_KEY` を即 rotate。smoke: `tests/smoke/test_deep_private_domain.py`。
+**残存リスク (受容済)**: `?key=` は URL 埋め込み secret = ブラウザ履歴 / access log / Cloudflare log / LINE 転送で
+流出しうる。漏洩時は interview/ + personal/ 全文が web 経由で第三者可読になる → 疑わしい時は `BRAIN_EXTENSION_KEY`
+を即 rotate (この個人利用トレードオフを海山が 2026-07-11 に受容)。smoke: `tests/smoke/test_deep_private_domain.py`。
 ★2026-07-12 追加の意図的例外 (6 系統目、音声 Phase 1): 通話中 PB retrieval
 (`services/voice_tools.search_brain_for_voice` = 音声アラインメント通話の brain_search tool) は chroma wiki
 collection をフィルタ無しで引く = **interview/ と clone_visibility:private を含む** (personal/ は索引時点で除外)。
@@ -136,12 +156,14 @@ gotcha/設計判断) を書いたら**同 session 内で repo docs へも commit
 ### コア
 - `main.py` — FastAPI webhook server + cron 起動 + file watcher (30s poll)
 - `brain_wiki.py` — Karpathy 式ナレッジベース (raw → LLM compile → wiki)、retrieval + clone respond
-- `brain_wiki_helpers/` — pure function 集 (visibility / recency_bias / store_keyword / llm_retry / frontmatter / **domain** = personal 非OWNDAYS ドメイン判定 §1.17 / **ontology** = 記憶層の path 決定論導出 / **edge_store** = 型付きエッジ sidecar (frontmatter 不使用、ADR 2026-07-05 §4) ★2026-07-05)
+- `brain_wiki_helpers/` — pure function 集 (visibility / recency_bias / store_keyword / llm_retry / frontmatter / **domain** = personal 非OWNDAYS ドメイン判定 §1.17 / **ontology** = 記憶層の path 決定論導出 / **edge_store** = 型付きエッジ sidecar (frontmatter 不使用、ADR 2026-07-05 §4) ★2026-07-05 / **daily_history_inject** = 日次売上の決定論注入 (国/エリア/業態/リーグ、捏造ゼロ) / **yoy_inject** = 昨年対比の決定論注入 ★2026-07-20 (既存店=Monday Dash 公式・全店=完了月 monthly.json のみ、日次自前YoYは作らない=捏造防止、本文日付で鮮度判定) / **business_intent** = 業務データ質問判定 + 売上follow-up検出 (個人Agent pre-route 用))
 - `privacy_gate.py` — 3 段プライバシーフィルタ (ルール → LLM 分類 → PII 除去)
 - `brain_commands.py` — LINE Bot コマンド (`/brain`, `/teach`, `/clone`, `/lint`, `/wiki`, `/forward` 等)
 - `routes/` — FastAPI APIRouter (`alignment_trial` / `brain_api`)
 - `tasks/` — background task (`self_improve`)
 - `services/auth.py` — admin user_id 権限ゲート
+- `services/agent_core.py` — **Umiyama AI Agent** (★2026-07-20 海山指示で個人 LINE bot を正式名称化 = 本人向け秘書、社員向け「うみやまAI」とは別物。通常テキストは目的メニュー無しで run_agent 直行、/help で全機能一覧、info 通知は 1日2回 digest 集約 = ADR `2026-07-20-umiyama-ai-agent-formalization.md`) の agentic コア (個人エージェント評価 #1): persona digest (identity/thinking/style) 常時注入 + bounded tool-loop (max 3 round / 55s budget = round 境界+各 tool 前判定 / **final round は tools 維持 + tool_choice none** = Anthropic は tool 履歴に tools 定義必須 / round0 失敗は従来単発 completion へ自動 fallback)。書込 tools は owner_memory の file 書込のみ = 外部送信ゼロ、Google scope readonly 不変。ADR `docs/decisions/2026-07-20-run-agent-agentic-upgrade.md`
+- `services/owner_memory.py` — 海山自身の恒久 owner-memory (事実/嗜好/進行中 + タスク + リマインダー書込 = clone_reminder_check 互換、bot 生成分は `reminders/auto/` 非追跡)。会話から fire-and-forget 自動抽出 (話者帰属 = 海山発話のみ根拠、揮発情報除外、auto tag + 保存都度 LINE 通知、§1.18 loud_fail)。LINE `/memory` で一望/編集 (admin gate 済)。`OWNER_MEMORY_ENABLED=0` / `OWNER_MEMORY_NOTIFY=0` opt-out。Redis 7日消失の根治
 - `content_extractor.py` — Google Docs/Excel/PDF/画像からテキスト抽出 (pypdf + pdfminer.six 両搭載)
 
 ### スクレイパー / 取り込み
@@ -154,7 +176,7 @@ gotcha/設計判断) を書いたら**同 session 内で repo docs へも commit
 - `mobile_owndays_historical.py` — OWNDAYS 過去 3 年履歴 (API 直叩き、週次フルリフレッシュ + 日次 incremental)
 - `gdrive_sync.py` — Google Drive selective sync (Monday Dash / Focus10 / WBR / 営業部)。★2026-07-11 共有ドライブ (driveId 先頭 0A) は `_list_shared_drive_files` で drive 全体 flat 取得 (通常フォルダ query だとサブフォルダ配下が silent 欠落する bug 修正)
 - `scripts/regulations_sync.py` + `scripts/regulations_sync.sh` — **社内規程 共有ドライブの月次取込 + 監視** (★2026-07-11 採用レビュー #2)。制度質問 (公休/産休/副業/就業規則) の unmet 66% 解消。既存 gdrive cron は plaud/monday-dash のみ (--all 無し) で規程を回さなかった。月次 (1日 06:00)、`--push` で loud_fail (候補ありなのに 0 取込 = 共有ドライブ DL 権限未付与を LINE 通知、7/6 の 5 日 silent 死の再発防止)。**要 海山/IT: sync アカウント bot-account@example.co.jp を当該共有ドライブの Contributor 以上に昇格** (現在 canDownload=False で 403、権限付与後は次回実行で 54 PDF 自動全取込)
-- `scripts/receipt_harvester.py` + `scripts/receipt_cron.sh` — **月額サービス領収書の月次収集 → 共有ドライブ**(★2026-07-02 海山指示、毎月1日 10:00)。**直読み方式**(当初の転送方式は `bot-account@example.co.jp` が外部メール受信不可=550 User unknown で不成立 → 廃止)。領収書が届く個人 Gmail `you@example.com` を harvester が直読み → PDF/画像(スクショ)/リンクPDF/本文 → 経費精算メンバーが見る**共有ドライブ** `RECEIPT_DRIVE_PARENT_ID/YYYY-MM/`(受信月・JST)へ upload。**2トークン**(Gmail読取=you `gmail.readonly` / Drive書込=**workspace-owner@example.co.jp** `drive`フル=既存folderに書くため必須。★2026-07-03 実運用で当初設計の umiyama-ai から変更=GCPオーナー/共有ドライブ権限の実態に合わせた)。精度: **既知ベンダー or 自己送信のみ取込**(件名一致の第三者はskip)、リンクfetchは許可ドメイン限定(SSRF防止)、冪等はstate増分保存+Drive appProperties重複チェック、失敗は`--push`でLINE loud化。セットアップ済(2トークン発行・`RECEIPT_DRIVE_PARENT_ID` 設定・94ファイル push 実績)。詳細: `docs/integrations/receipt-harvester.md`
+- `scripts/receipt_harvester.py` + `scripts/receipt_cron.sh` — **月額サービス領収書の月次収集 → 共有ドライブ**(★2026-07-02 海山指示、毎月1日 10:00)。**直読み方式**(当初の転送方式は `bot-account@example.co.jp` が外部メール受信不可=550 User unknown で不成立 → 廃止)。領収書が届く個人 Gmail `you@example.com` を harvester が直読み → PDF/画像(スクショ)/リンクPDF/本文 → 経費精算メンバーが見る**共有ドライブ** `RECEIPT_DRIVE_PARENT_ID/YYYY-MM/`(受信月・JST)へ upload。**2トークン**(Gmail読取=umiyama0 `gmail.readonly` / Drive書込=**ceo@owndays.co.jp** `drive`フル=既存folderに書くため必須。★2026-07-03 実運用で当初設計の umiyama-ai から変更=GCPオーナー/共有ドライブ権限の実態に合わせた)。精度: **既知ベンダー or 自己送信のみ取込**(件名一致の第三者はskip)、リンクfetchは許可ドメイン限定(SSRF防止)、冪等はstate増分保存+Drive appProperties重複チェック、失敗は`--push`でLINE loud化。セットアップ済(2トークン発行・`RECEIPT_DRIVE_PARENT_ID` 設定・94ファイル push 実績)。詳細: `docs/integrations/receipt-harvester.md`
 - `kpi_dash_scraper.py` — kpi-dash.com Dashboard 週次 scrape (= Playwright login + BFS 巡回、月曜 18:00 JST、★2026-05-25)
 - `scripts/meeting_autojoin.py` + `meeting_autojoin_cron.sh` — **umiyama の web 会議に Recall bot 自動参加 → 議事録 → wiki** (★2026-07-03 海山指示、10分毎 7-22時)。カレンダー監視 (umiyama-ai token、共有済) → 参加判定 (録音OFF denylist 日英 = 面接/面談/1on1/評価/退職/昇進/給与/報酬/M&A/弁護士/医療/極秘 等 + **2人会議=実質1on1 skip** + **社外同席 default skip**、`[no-ai]`/`[ai-ok]` marker=社内 organizer のみ有効) → Recall (ap-northeast-1) に join_at 予約 → 終了後 poll で transcript → 既存 `/api/meeting/ingest` (= Plaud と同経路、PrivacyGate → compile_meeting_note → wiki/meetings/) + LINE 通知。冪等 state、gate `MEETING_AUTOJOIN_ENABLED=1`、loud_fail 配線。詳細: `docs/integrations/meeting-pipeline.md`
 - `chat_import.py` — LINE / WhatsApp エクスポート .txt パーサー (★2026-07-05 空白区切り LINE variant + 複数行 + ドット日付 + WhatsApp 日本語ロケール 午前/午後 対応)
@@ -194,7 +216,7 @@ gotcha/設計判断) を書いたら**同 session 内で repo docs へも commit
 - `scripts/codex_review.sh` + `scripts/codex_review_schema.json` — Codex CLI (別系列 OpenAI、`codex exec` read-only) で Claude のコードを独立レビュー。**model 既定 = gpt-5.6-sol** (★2026-07-12 海山指示、host CLI 0.144.1 へ upgrade + MODEL_OK 実証。env CODEX_REVIEW_MODEL で上書き可)。週次 diff (日曜 07:00) + 月次 全体 sweep (1日 07:30)、指摘ありの時だけ LINE。認証は codex login (~/.codex/auth.json、設定済) or CODEX_API_KEY のどちらか、両方無ければ loud-skip (★2026-06-08 海山指示、cross-check の automation gap を埋める。★2026-06-10 廃止 flag 除去 + login 認証対応で実稼働化)
 
 ### ヘルスチェック
-- `scripts/sales_data_health.py` — 05:30 daily L1-L4 健全性 (scraper / wiki / bot / deploy)
+- `scripts/sales_data_health.py` — 05:30 daily L1-L5 健全性 (scraper / wiki / bot / deploy / **chroma ブロート** ★2026-08-14 = サイズ+メモリ+増加率+ETA、warn 8GB は週次 nag / crit 11GB で日次 🚨、sqlite と HNSW の内訳も測る = 打ち手が分かれるため。ADR `2026-08-14-chroma-bloat-remediation.md`)
 - `scripts/sales_accuracy_check.py` — 06:00 daily 売上数字 正確性検証 (verdict: PASS/DECLINED/FAIL/**BOT_UNAVAILABLE**)
 - `scripts/health_cron.sh` — wrapper (cron_env.sh source 込み)
 - `scripts/cron_env.sh` — cron 3 点セット (PATH + .env + LITELLM_URL)
@@ -245,6 +267,11 @@ gotcha/設計判断) を書いたら**同 session 内で repo docs へも commit
 - `fast` / `default` — GPT-4o (チャット応答 / Privacy 分類 = 全 traffic の最頻)
 - `fast-gpt` — GPT-5.4-mini (Wiki compile 本番 / 軽量代替)
 - `code` / `code-max` — GPT-5.4-pro / GPT-5-pro (内部コードタスク)。コードレビューは Codex CLI の gpt-5.6-sol (§2)
+- `local-qwen` — **Qwen3.8-27B (Mac Studio ローカル、Ollama MLX)** ★2026-08-03 海山指示。
+  API コスト 0 / 外部送信 0 / 実測 29-40 tok/s / 19GB GPU 常駐。thinking 既定 OFF (思考が
+  max_tokens を食い content 空になるため)。未使用 5 分で自動アンロード = 本番にメモリを返す。
+  fallback: fast-gpt→smart-gpt (ローカル障害で bot を止めない)。用途 (privacy 分類・OCR 等)
+  への適用は品質 A/B 後。詳細: `docs/integrations/local-llm-qwen.md`
 
 GPT-5 Codex 系は `/v1/responses` 専用で litellm 非対応 → Codex CLI 直接使用 (レビューは gpt-5.6-sol、★2026-07-12)。
 
@@ -253,6 +280,7 @@ GPT-5 Codex 系は `/v1/responses` 専用で litellm 非対応 → Codex CLI 直
 主要 cron だけ抜粋:
 - 02:00 nightly scan / 02:30 metrics / 03:00 auto_improve / 03:30 regression / 03:45 hallucination / 04:05 privacy-review / 04:00 月曜 weekly_batch / 04:30 月初 alignment_snapshot
 - 05:30 sales_data_health (L1-L4) / 06:00 sales_accuracy_check / 07:10 policy_diff_check (★2026-07-10)
+- 10:00・19:00 notify-digest (★2026-07-20 info 系通知の 1日2回まとめ配信、空なら無音。critical は従来即時)
 - scrape_cron.sh 2h おき 9-23 時 (OWNDAYS 売上 + 履歴 + 店舗日次)
 - 21:00 月曜 gdrive_sync / **18:00 月曜 kpi_dash_scraper (★2026-05-25)** / 08:00 daily Plaud / LINE Works は scrape_cron.sh 内で 2h おき (9-23時) / 23:30 daily Apple Notes
 - **03:00 月/火/水 build_monday_dash_latest (★2026-05-25、★2026-06-08 月曜追加=「先週売上」stale bug fix)** — Monday Dash 最新を core wiki に集約 (= 海山-critical、月曜は Section 1 週次合計の鮮度用、火曜失敗時の保険で水曜も run)
@@ -278,6 +306,9 @@ GPT-5 Codex 系は `/v1/responses` 専用で litellm 非対応 → Codex CLI 直
   - `2026-07-05-wiki-ontology-multilayer.md` — wiki 多層オントロジー化 4 フェーズ (0 導出層 / 1 孤島接続 / 2 語彙統制 / 3 retrieval 封印) + frontmatter 関係キー持続化の不採用 + 実装地雷登録
   - `2026-07-12-semantic-layer-direction.md` — 社内 AI 向けセマンティックレイヤーの方向づけ (★海山指示、direction-only = 実装未起動。発火条件 3 + 再評価 2026-10。新規 AI プロダクトは hub-pattern チェックリスト 7 で「指標の問い」を必ず通す)
   - `2026-07-12-pb-control-center-portability.md` — PB = コントロールセンター / 開発 CLI 非依存の原則 (★海山方針の再確認。substrate=plain file・adapter 分離・CLI 切替 checklist 5 項・§1.19 に圧縮規律)
+  - `2026-07-20-run-agent-agentic-upgrade.md` — run_agent の agentic 化 (tool-loop + owner-memory + persona 注入、個人エージェント評価 #1 の実装)
+  - `2026-07-20-umiyama-ai-agent-formalization.md` — 個人 LINE bot = Umiyama AI Agent 正式化 (目的メニュー廃止 + /help + info 通知の 1日2回 digest 集約。★海山「無用な通知等は極力なくす」)
+  - `2026-08-14-chroma-bloat-remediation.md` — chroma HNSW ブロート再発 (5.2GB / ~285MB日) の監視・計画 rebuild・恒久策 (churn 削減 vs pgvector)。★上流は設計上 unbounded (chroma#2594 が 2 年 open) で回収手段が無いことを一次情報で確認。距離関数が既定 l2 なのにコメントは cosine = 要実測 (未解決)
 - **Failure log**: `docs/failure-log.md` (★YYYY-MM-DD 学びを時系列集約、再発防止参照用)
 - **Runbook**: `docs/runbook.md` (cron / restart / 売上検証 / docker rebuild / chromadb 復旧 等の運用手順)
 - **Integrations**: `docs/integrations/`

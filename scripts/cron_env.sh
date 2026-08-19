@@ -16,8 +16,22 @@
 # 1) PATH: Docker Desktop / Homebrew(Intel/AppleSilicon) の bin を前方追加
 export PATH="/usr/local/bin:/opt/homebrew/bin:/Applications/Docker.app/Contents/Resources/bin:$PATH"
 
-# 2) .env を source (cron は親 shell の env を継承しないので必須)
 _BRAIN_ROOT="/Users/brain/brain-agent"
+
+# 1b) python3 は **repo の .venv に固定** (★2026-08-17 本番障害の再発防止)
+# 事故: Ollama を brew upgrade した際に依存として python@3.14 が入り、
+# /opt/homebrew/bin/python3 の向き先が 3.13 → 3.14 に張り替わった。3.14 は新しい
+# site-packages なので httpx 等が無く、上の PATH で homebrew を前方に置いている
+# cron スクリプトが **全滅** した (bot 死活監視が 39 回連続 ModuleNotFoundError =
+# §1.3 の自動復旧の安全網が無音で停止)。「PATH で python を引く」限り、無関係な
+# brew 操作のたびに同じ事故が起きる。repo が管理する .venv (3.12、依存一式あり) に
+# 固定して外部の更新から切り離す。
+if [ -x "$_BRAIN_ROOT/.venv/bin/python3" ]; then
+    export PATH="$_BRAIN_ROOT/.venv/bin:$PATH"
+    export VIRTUAL_ENV="$_BRAIN_ROOT/.venv"
+fi
+
+# 2) .env を source (cron は親 shell の env を継承しないので必須)
 if [ -f "$_BRAIN_ROOT/.env" ]; then
     set -a
     # shellcheck disable=SC1091

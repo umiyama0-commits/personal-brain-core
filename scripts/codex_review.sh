@@ -119,8 +119,8 @@ def notify(msg):
     try:
         import sys as _sys
         _sys.path.insert(0, "scripts")  # clone_improve_lib は scripts/ 配下
-        from clone_improve_lib import line_push
-        line_push(msg); return
+        from clone_improve_lib import line_push_digest
+        line_push_digest(msg, "Codexレビュー"); return
     except Exception:
         pass
     import urllib.request, json as _j

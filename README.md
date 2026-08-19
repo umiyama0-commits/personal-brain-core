@@ -6,7 +6,48 @@ Karpathy-style knowledge base, and a set of self-improvement loops.
 This repository is the **core system only**. It contains no personal or
 business data — all real conversations, knowledge, personas, and sales figures
 live under `data/` at runtime and are `.gitignore`d. Example values in code,
-tests, and docs have been replaced with fictional placeholders.
+tests, and docs have been replaced with fictional placeholders, and the export
+is gated by a scanner that refuses to publish if anything real survives
+(see [SECURITY.md](SECURITY.md)).
+
+It has been running in production since April 2026 as the assistant for a
+retail CEO and, in a separate public-facing persona, for ~120 employees.
+**1,600+ tests** run without any private data.
+
+## Why it might be worth reading
+
+Most of what is interesting here is not the RAG pipeline — it is the set of
+guardrails that grew out of things going wrong in production. A few that
+generalize beyond this system:
+
+- **Superlatives cannot be answered by retrieval.** Asked for a record high,
+  the bot answered with the maximum of whatever chunks the search happened to
+  return — a real number, correctly hedged, and still wrong, because a higher
+  one existed in the same file. Ranking is now computed deterministically and
+  injected; the model is told not to look for the maximum itself.
+  (`brain_wiki_helpers/record_inject.py`)
+- **A gate that refuses is not the same as a gate that is safe.** An
+  append-guard correctly stopped an oversized write 191 times in a row — and
+  discarded the content each time. Refusing and preserving are separate
+  requirements. (`brain_wiki_helpers/wiki_append.py`)
+- **The classifier is itself an injection target.** The privacy filter embeds
+  candidate text into its own prompt, so the text can impersonate instructions
+  to the classifier. The defense is deterministic and runs before the model,
+  so swapping the model does not change it. (`privacy_gate.py`)
+- **Guards written as vocabulary lists die to paraphrase.** A guard that
+  blocked the bot from turning its own "I don't have that data" into a wiki
+  page was bypassed by rewording. It was replaced with attribution: an edit
+  grounded only in the assistant's own utterances is never applied
+  automatically. (`scripts/clone_auto_improve.py`)
+- **A rebuild that reads only its source silently truncates.** History files
+  were rebuilt from scratch each run and fully overwritten, so a 30-day
+  retention policy upstream quietly shortened the history downstream. Inputs
+  that vary in coverage need to be unioned, not overwritten.
+- **Alerts state a hypothesis, not a cause.** One reported a duplicate-append
+  loop; every line in the file was unique. The real cause was elsewhere.
+
+Each of these is documented where it lives, in the module that carries the
+scar.
 
 ## What it does
 
@@ -58,6 +99,15 @@ no network, and no API keys.
 Copy `.env.example` to `.env` and fill in your own values (LLM keys, LINE /
 LINE Works credentials, etc.). Nothing in this repo contains real secrets.
 
+## Where to start
+
+| If you are… | Read |
+|---|---|
+| deciding whether this is relevant at all | the section above, then `docs/porting/00_CONCEPT_DECK_FOR_CEO.md` |
+| porting it to another person / company | `docs/porting/GENERIC_VS_SPECIFIC.md` — what is reusable vs what must be replaced |
+| standing it up from zero | `docs/porting/SETUP_FROM_ZERO.md` |
+| interested in the privacy model | `privacy_gate.py`, `brain_wiki_helpers/visibility.py`, `docs/porting/PRIVACY_COMPLIANCE.md` |
+
 ## License
 
-TODO — choose a license before making the repository public.
+MIT — see [LICENSE](LICENSE).

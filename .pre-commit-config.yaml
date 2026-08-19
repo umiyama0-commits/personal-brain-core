@@ -31,7 +31,7 @@ repos:
 
   # ─── gitleaks — secret 検出 (★2026-05-23 LEE §4.1) ───
   # CLAUDE.md / .py / .yaml への平文 API key / password 直書きを commit 段階で blockする。
-  # 検出パターン: sk-(ant|proj|litellm)-* / 社内 password / LOGIN_PASS=" / etc.
+  # 検出パターン: sk-(ant|proj|litellm)-* / Owndays\d+ / LOGIN_PASS=" / etc.
   # 既存 leak は data/brain/raw/notes/ (gitignored) のみで commit に影響しない。
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.21.2

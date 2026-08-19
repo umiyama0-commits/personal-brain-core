@@ -80,7 +80,7 @@ case "$MODE" in
     dev-journal)
         # ★2026-07-01 Claude Code 開発セッション → personal/dev (増分・人格非直結)。dev_journal_sync 参照。
         echo "[$TS] clone_cron dev-journal start"
-        python3 scripts/dev_journal_sync.py
+        python3 scripts/dev_journal_sync.py --push
         echo "[$TS] clone_cron dev-journal done"
         ;;
     personal-snapshot)
@@ -164,6 +164,24 @@ case "$MODE" in
         rc=$?
         echo "[$TS] clone_cron cost-daily done (rc=$rc)"
         ;;
+    notify-digest)
+        # ★2026-07-20 Umiyama AI Agent 正式化 (海山「無用な通知等は極力なくす」):
+        # info 系通知 queue を 1 通に集約して配信 (10:00/19:00、空なら無音)
+        echo "[$TS] clone_cron notify-digest start"
+        python3 -c "import sys; sys.path.insert(0, 'scripts'); from clone_improve_lib import flush_notify_digest; print('digest flushed:', flush_notify_digest(), 'entries')"
+        rc=$?
+        echo "[$TS] clone_cron notify-digest done (rc=$rc)"
+        ;;
+    ingest-audit)
+        # ★2026-08-09: 取り込み **後** の日次監査。2026-08-06〜09 に同じ型の事故が 4 回出た
+        # (誤答の wiki 化 / 未発表の人事報酬が public 昇格しかけ / §1.9 文書の閲覧 / 二重索引)。
+        # 入口の門は増やしたが「入った後に効く歯止め」が無かった。propose-only (自動修正なし)。
+        echo "[$TS] clone_cron ingest-audit start"
+        python3 scripts/ingest_audit.py --push
+        rc=$?
+        echo "[$TS] clone_cron ingest-audit done (rc=$rc)"
+        ;;
+
     credit-check)
         # ★2026-05-23 海山指示: 外部 service 残高切れ silent fail 防止
         # Vapi / LiteLLM の残高 / 使用率を監視、閾値超で LINE Push

@@ -94,8 +94,8 @@ def _loud(ok: bool, detail: str = "") -> None:
 
 def _push(text: str) -> None:
     try:
-        from clone_improve_lib import line_push
-        line_push(text)
+        from clone_improve_lib import line_push_digest
+        line_push_digest(text, "magazine")
     except Exception as e:
         logger.warning(f"LINE push 失敗 (処理は継続): {e}")
 

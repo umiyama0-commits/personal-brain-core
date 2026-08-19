@@ -131,7 +131,7 @@ def isolated_brain_root(tmp_path, monkeypatch):
 @pytest.fixture
 def mock_http():
     """Mock litellm HTTP client。"""
-    return MockHTTPClient(default_response="了解、関東Aエリアの売上は 1,500,000 円。")
+    return MockHTTPClient(default_response="了解、関東Aエリアの売上は 1,777,111 円。")
 
 
 @pytest.fixture
@@ -146,13 +146,13 @@ def seeded_index():
     return MockBrainIndex(seed_hits={
         "売上": [
             {"source": "knowledge/owndays-daily-sales.md",
-             "content": "全社売上 16,000,000 円、客数 1,000 人"},
+             "content": "全社売上 20,325,213 円、客数 1,228 人"},
             {"source": "knowledge/owndays-daily-stores.md",
-             "content": "サンプル駅前店 12,345 円 / 1 客"},
+             "content": "武蔵小山パルム 19,727 円 / 1 客"},
         ],
         "店舗": [
             {"source": "knowledge/owndays-store-master.md",
-             "content": "999 店、9 AM、99 SV、40 都道府県"},
+             "content": "304 店、6 AM、27 SV、38 都道府県"},
         ],
     })
 

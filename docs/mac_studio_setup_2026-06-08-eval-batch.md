@@ -48,13 +48,13 @@ brew install restic git-filter-repo     # filter-repo は #3 で使う
 
 # 2. Backblaze B2 を用意 (推奨・S3 より安い):
 #    https://www.backblaze.com → アカウント作成
-#    - B2 Cloud Storage → Buckets → Create a Bucket (例: your-backup-bucket、Private)
+#    - B2 Cloud Storage → Buckets → Create a Bucket (例: umiyama-brain-backup、Private)
 #    - App Keys → Add a New Application Key (上記 bucket に限定) → keyID と applicationKey を控える
 #    ※ S3 を使うなら .env の AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY 側を埋める
 
 # 3. .env に追記 (★RESTIC_PASSWORD を失うと永久に復元不能 → 1Password 等に別途保管)
 vim .env
-#   RESTIC_REPOSITORY=b2:your-backup-bucket:restic
+#   RESTIC_REPOSITORY=b2:umiyama-brain-backup:restic
 #   RESTIC_PASSWORD=<強いパスフレーズ>           例: openssl rand -base64 32
 #   B2_ACCOUNT_ID=<keyID>
 #   B2_ACCOUNT_KEY=<applicationKey>
@@ -89,7 +89,7 @@ bash scripts/purge_conversation_history.sh --dry-run       # 646件 + 前提チ�
 bash scripts/purge_conversation_history.sh --execute --i-have-backup-and-approval
 
 # (c) force-push (GitHub の履歴からも消す)
-git remote add origin git@github.com:your-org/your-repo.git
+git remote add origin git@github.com-brain-agent:umiyama0-commits/brain-agent.git
 git log --all --name-only --pretty=format: -- 'data/brain/raw/notes/lineworks_*' | head  # 空を確認
 git push origin --force --all && git push origin --force --tags
 

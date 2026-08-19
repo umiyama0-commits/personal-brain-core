@@ -141,6 +141,20 @@ async def call_llm(
     }
     if temperature is not None:
         payload_base["temperature"] = temperature
+    # ★2026-08-03: temperature 非対応モデル (Opus 4.8 / Fable 5) に送ると Anthropic が 400 →
+    # litellm が無言で gpt-4o へ fallback する。judge (model="smart", temperature=0.0) がこれで
+    # gpt-4o に落ち、bot (GPT-5.4) と同一 provider = §1.15 の self-eval 防壁が無効化されていた。
+    # 呼び元が temperature を渡していても、非対応モデルなら落とす (呼び元総当たり修正を不要に)。
+    try:
+        import sys as _sys
+        if str(APP_ROOT) not in _sys.path:
+            _sys.path.insert(0, str(APP_ROOT))
+        from brain_wiki_helpers.model_params import supports_temperature
+        if not supports_temperature(model):
+            payload_base.pop("temperature", None)
+    except Exception as _mp_err:
+        # 落ちても従来動作 (temperature 送信) に戻るだけ。ただし silent にしない
+        logger.warning(f"model_params guard 適用失敗 (従来動作で継続): {_mp_err}")
     async with httpx.AsyncClient() as http:
         for attempt in range(retries):
             try:
@@ -207,15 +221,103 @@ def read_jsonl(path: Path) -> list[dict]:
 _LINE_PUSH_STATE = IMPROVE_DIR / ".line_push_daily.json"
 
 
+_LINE_QUOTA_STATE = IMPROVE_DIR / ".line_quota_month.json"
+
+
+def _days_left_in_month(now: datetime) -> int:
+    """当日を含む「今月の残り日数」。"""
+    import calendar
+    return calendar.monthrange(now.year, now.month)[1] - now.day + 1
+
+
+def _daily_cap() -> int:
+    """日次の **即時 push** 上限。月次枠の実残量から動的に決める。
+
+    ★2026-08-03: 従来は静的 6 通/日 固定だった。6×31=186 通は digest 配信 (2/日=62) と
+    critical を足すと無料枠 200 を確実に超える一方、朝の同時刻に info が集中すると
+    午前中に 6 を使い切って残り終日 drop、という「枠は余っているのに落ちる」形になっていた
+    (実測 8/3: 月枠 200 中 33 通しか使っていないのに 09:00 で日次上限到達)。
+    残量ベースなら月初は緩く月末は締まり、締まった分は digest に回るだけで欠落しない。
+    state 不在 / 月替り直後 / 取得失敗時は従来の静的既定へフォールバック (fail-open)。
+    """
+    static = int(os.getenv("LINE_PUSH_DAILY_CAP", "6") or 6)
+    if static <= 0:
+        return 0  # 明示 0 = 上限無効 (従来互換)
+    try:
+        st = json.loads(_LINE_QUOTA_STATE.read_text(encoding="utf-8"))
+    except Exception:
+        return static
+    now = datetime.now(JST)
+    if st.get("month") != now.strftime("%Y-%m"):
+        return static  # 月替り後まだ refresh していない
+    limit = int(st.get("limit") or 0)
+    lo = int(os.getenv("LINE_PUSH_DAILY_MIN", "2") or 2)
+    hi = int(os.getenv("LINE_PUSH_DAILY_MAX", "12") or 12)
+    if limit <= 0:
+        return hi  # 無制限プラン (type=none) — 締める理由が無い
+    days_left = max(1, _days_left_in_month(now))
+    # critical 用の取り置き + digest 配信 (1日2回) の実費を先に確保してから按分する
+    reserve = int(os.getenv("LINE_PUSH_CRITICAL_RESERVE", "40") or 40)
+    budget = max(0, limit - int(st.get("used") or 0) - reserve - 2 * days_left)
+    return max(lo, min(hi, budget // days_left))
+
+
+def refresh_line_quota(force: bool = False) -> dict:
+    """LINE 公式 API から月次枠と当月消費を取得し state に保存する (1日1回)。
+
+    ★2026-08-03: 7/24〜7/31 に 429 (月次上限) で通知が落ちていたのを、月替りまで誰も
+    検知できなかった (枯渇してから気付く状態)。消費率を毎日 state に持ち、
+    LINE_QUOTA_WARN_PCT (既定 80%) 超で critical 通知する。
+    実 API 呼び出しは 1日1回だけ (digest flush = 10:00/19:00 から呼ばれる)。
+    """
+    token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+    now = datetime.now(JST)
+    today = now.strftime("%Y-%m-%d")
+    try:
+        st = json.loads(_LINE_QUOTA_STATE.read_text(encoding="utf-8"))
+    except Exception:
+        st = {}
+    if not force and st.get("checked") == today and st.get("month") == now.strftime("%Y-%m"):
+        return st
+    if not token:
+        return st
+    try:
+        with httpx.Client(timeout=15) as http:
+            h = {"Authorization": f"Bearer {token}"}
+            q = http.get("https://api.line.me/v2/bot/message/quota", headers=h).json()
+            c = http.get("https://api.line.me/v2/bot/message/quota/consumption", headers=h).json()
+    except Exception as e:
+        logger.warning(f"LINE quota 取得失敗: {type(e).__name__}: {e}")
+        return st
+    limit = int(q.get("value") or 0) if q.get("type") == "limited" else 0
+    used = int(c.get("totalUsage") or 0)
+    st = {"checked": today, "month": now.strftime("%Y-%m"),
+          "type": q.get("type", "?"), "limit": limit, "used": used}
+    try:
+        _LINE_QUOTA_STATE.parent.mkdir(parents=True, exist_ok=True)
+        _LINE_QUOTA_STATE.write_text(json.dumps(st), encoding="utf-8")
+    except Exception:
+        pass  # 保存失敗は静的 cap へ自然に縮退する
+    pct = round(used * 100 / limit) if limit else 0
+    warn = int(os.getenv("LINE_QUOTA_WARN_PCT", "80") or 80)
+    # state を書いた **後** に呼ぶ (loud_fail → line_push → _daily_cap は state 読取のみ = 再帰しない)
+    loud_fail("line_quota_pressure", not (limit and pct >= warn),
+              detail=f"LINE 月次枠 {used}/{limit} 通 ({pct}%) を消費。残り {_days_left_in_month(now)} 日。"
+                     "\n超過分は自動でダイジェストへ回送されるため欠落はしないが、"
+                     "critical 通知の余裕が細るためプラン見直しの検討時期。",
+              threshold=1, cooldown_h=48)
+    return st
+
+
 def _personal_quota_ok(enforce: bool = True) -> bool:
     """personal LINE の日次送信上限 (★2026-06-11 海山指示「通知の数は減らしてよい」)。
 
     無料枠 200通/月 を alert storm (flapping monitor 等) が数日で食い潰した再発防止。
-    LINE_PUSH_DAILY_CAP (default 6、0=無効) 超の非critical は **drop** (★2026-07-10
-    LW 迂回廃止 — 海山「LW は社員公開用」)。critical は enforce=False で呼ばれ、
-    カウントは記録しつつ cap では止めない (= 月間会計の可視性は維持、配達優先)。
+    上限超の非critical は **digest queue へ回送** (★2026-08-03 — 従来は drop で欠落していた。
+    ★2026-07-10 LW 迂回廃止は維持 — 海山「LW は社員公開用」)。critical は enforce=False で
+    呼ばれ、カウントは記録しつつ cap では止めない (= 月間会計の可視性は維持、配達優先)。
     """
-    cap = int(os.getenv("LINE_PUSH_DAILY_CAP", "6") or 6)
+    cap = _daily_cap()
     if cap <= 0:
         return True
     today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
@@ -248,14 +350,45 @@ _OPENAI_ALIASES = {"smart-gpt", "smart-gpt-pro", "fast-gpt", "fast", "default",
                    "smart-fallback", "code", "code-max"}
 
 
-def pick_cross_family_judge(bot_model: str = "") -> str:
-    """bot 側 model alias から「別系列の judge alias」を返す (self-eval loop 遮断)。
+def model_family(model: str) -> str:
+    """model alias / 生 ID から系列 ("openai" / "anthropic" / "other") を返す。
 
-    bot が OpenAI 系 → judge は Claude (smart)。bot が Claude 系 (または未知 alias) →
-    judge は GPT (smart-gpt)。bot_model 未指定は env CLONE_PUBLIC_PROD_MODEL (default smart)。
+    ★2026-08-03 §1.15 DA: 従来は alias 集合の等値判定だけだったため、.env に **生の ID**
+    (`CLONE_PUBLIC_PROD_MODEL=gpt-5.4` 等。§1.19③ は推論経路のコード hardcode を禁じているが
+    .env の値は対象外なので現実に起こりうる) を入れると「未知 alias → Claude 扱い」に落ち、
+    judge も OpenAI になって **self-eval 防壁が無音で消える**ことが実証された。
+    alias 表に無い時は生 ID の provider marker で補う。
     """
-    bot = (bot_model or os.getenv("CLONE_PUBLIC_PROD_MODEL", "smart")).strip().lower()
-    return "smart" if bot in _OPENAI_ALIASES else "smart-gpt"
+    m = (model or "").strip().lower()
+    if not m:
+        return "other"
+    if m in _OPENAI_ALIASES:
+        return "openai"
+    if m in {"smart", "supervisor", "smart-sonnet", "smart-legacy"}:
+        return "anthropic"
+    # 生 ID / 未知 alias の fallback (alias 表の保守漏れを塞ぐ)
+    if any(k in m for k in ("gpt", "openai/", "o1-", "o3-", "luna", "sol")):
+        return "openai"
+    if any(k in m for k in ("claude", "anthropic/", "opus", "sonnet", "haiku", "fable", "mythos")):
+        return "anthropic"
+    return "other"
+
+
+def pick_cross_family_judge(bot_model: str = "") -> str:
+    """bot 側 model から「別系列の judge alias」を返す (self-eval loop 遮断)。
+
+    bot が OpenAI 系 → judge は Claude (smart)。bot が Anthropic 系 → judge は GPT (smart-gpt)。
+    **系列不明** は安全側に倒して Claude (smart) を返す — 未知 model は OpenAI 系である可能性が
+    あり、"other→smart-gpt" だと同系列に当たりうるため (DA 実証の穴)。
+    bot_model 未指定は env CLONE_PUBLIC_PROD_MODEL (default smart)。
+    """
+    bot = bot_model or os.getenv("CLONE_PUBLIC_PROD_MODEL", "smart")
+    fam = model_family(bot)
+    if fam == "openai":
+        return "smart"
+    if fam == "anthropic":
+        return "smart-gpt"
+    return "smart"
 
 
 def supervisor_model() -> str:
@@ -272,7 +405,8 @@ def supervisor_model() -> str:
     return os.getenv("SUPERVISOR_MODEL", "supervisor").strip() or "supervisor"
 
 
-def line_push(text: str, critical: bool = False) -> bool:
+def line_push(text: str, critical: bool = False, *, allow_digest: bool = True,
+              bypass_cap: bool = False) -> bool:
     """海山への通知。主経路 = personal LINE (ALIGNMENT_TARGET_USER 宛)。
 
     ★2026-07-10 海山指示「LINE WORKS はあくまで社員公開用」: うみやまAI DM への
@@ -281,6 +415,20 @@ def line_push(text: str, critical: bool = False) -> bool:
     personal LINE 限定 — quota 超過・送信失敗時は log を残して False (LW に流さない)。
     critical は日次 cap もバイパスして personal を先に試す (LW は本当に届かない時だけ)。
     env `LW_FALLBACK_DISABLE=1` で critical でも LW 完全遮断 (通知は personal のみ)。
+
+    ★2026-08-03: 日次上限に当たった非 critical は **drop せず digest queue へ回送** する。
+    digest は 1日2回 1通に集約されるので追加コストは実質ゼロで、内容だけが保全される。
+    `allow_digest=False` は digest flush 自身と queue 書込失敗 fallback からの呼び出し用
+
+    ★2026-08-17 デッドロック修正 (実害 15 日): 月枠 200 の残量から日次 cap が動的に決まる
+    (実測 8/17: 171/200 使用 → cap=2)。critical が先に cap を使い切ると、非 critical は
+    digest queue へ回送されるが、**その digest flush 自身も同じ cap に弾かれて drop** し、
+    draining file に溜まったまま二度と出ない。結果、info 通知は **8/2 を最後に 15 日間
+    1 通も届かず 97 件が滞留**していた (loud_fail を配線しても届かない = 監視全体が盲目)。
+    digest は最大 20 件を 1 通に集約したものなので、cap で止める意味が無い (止めるほど
+    1 通あたりの情報量が増えるだけ)。`bypass_cap=True` で cap を回避する — カウントは
+    従来どおり記録するので月間会計の可視性は落ちない。
+    (= 回送先が自分自身になる無限ループの防止。この 2 経路だけが False を渡す)。
     """
     token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
     user = os.getenv("ALIGNMENT_TARGET_USER")
@@ -288,7 +436,11 @@ def line_push(text: str, critical: bool = False) -> bool:
     # 日次 cap は非 critical のみに適用 (critical は月200通を割いてでも personal 優先。
     # enforce=False でカウントだけ記録 = 月間会計の可視性を維持、DA 指摘反映)
     if token and user:
-        if not _personal_quota_ok(enforce=not critical) and not critical:
+        _exempt = critical or bypass_cap
+        if not _personal_quota_ok(enforce=not _exempt) and not _exempt:
+            if allow_digest and os.getenv("NOTIFY_DIGEST_DISABLE", "") != "1":
+                logger.info("line_push 日次上限 → digest queue へ回送 (drop しない)")
+                return line_push_digest(text, "遅延配信")
             logger.warning("line_push 日次上限 (非critical) → 通知 drop (LW には流さない)")
             return False
     if token and user:
@@ -315,6 +467,140 @@ def line_push(text: str, critical: bool = False) -> bool:
             "LINE_CHANNEL_ACCESS_TOKEN or ALIGNMENT_TARGET_USER not set"
             f" → {'LW fallback' if allow_lw else 'drop (非critical)'}")
     return _lw_admin_push(text) if allow_lw else False
+
+
+# ★2026-07-20 Umiyama AI Agent 正式化 (海山「無用な通知等は極力なくす」):
+# info/report 系の push は即時送信せず queue に積み、1日2回 (10:00/19:00 cron) に
+# 1 通へ集約して配信する。空なら配信自体しない。critical/actionable (bot死・売上FAIL・
+# CI赤・リマインダー・週次承認待ち等) は従来どおり line_push 即時。
+NOTIFY_DIGEST_QUEUE = DATA_BRAIN / "notify_digest_queue.jsonl"
+
+
+DIGEST_MAX_PER_FLUSH = 20
+DIGEST_STALE_H = 26  # queue 最古 entry がこれを超えたら flush 不動作疑い (dead-man)
+
+
+def line_push_digest(text: str, component: str = "") -> bool:
+    """info 系通知をダイジェスト queue へ積む (即時 push しない)。
+
+    escape hatch: env NOTIFY_DIGEST_DISABLE=1 で従来の即時 line_push に戻る。
+    queue 書込失敗時は通知を失わないよう即時 push へ fallback (fail-open)。
+    ★dead-man (cross-check DA): queue 最古 entry が DIGEST_STALE_H 超 = flush cron が
+    回っていない疑い → writer 側から loud_fail (flush 自身が死んでいても検知できる網)。
+    """
+    if os.getenv("NOTIFY_DIGEST_DISABLE", "") == "1":
+        return line_push(text, allow_digest=False)
+    import fcntl
+    import time as _time
+    try:
+        NOTIFY_DIGEST_QUEUE.parent.mkdir(parents=True, exist_ok=True)
+        entry = json.dumps({
+            "ts": datetime.now(JST).strftime("%m/%d %H:%M"),
+            "epoch": int(_time.time()),
+            "component": component or "info",
+            "text": text[:2000],
+        }, ensure_ascii=False)
+        with open(NOTIFY_DIGEST_QUEUE, "a", encoding="utf-8") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            f.write(entry + "\n")
+        try:
+            first = NOTIFY_DIGEST_QUEUE.read_text(encoding="utf-8").split("\n", 1)[0]
+            oldest = json.loads(first).get("epoch", 0)
+            stale = bool(oldest) and (_time.time() - oldest) > DIGEST_STALE_H * 3600
+            loud_fail("notify_digest_stale", not stale,
+                      detail=f"digest queue 最古 entry が {DIGEST_STALE_H}h 超 = flush cron 不動作疑い",
+                      threshold=3, cooldown_h=24)
+        except Exception:
+            pass
+        return True
+    except Exception as e:
+        logger.warning(f"digest queue append failed ({e}) → 即時 push に fallback")
+        return line_push(text, allow_digest=False)
+
+
+def _digest_entry_text(e: dict, cap: int = 600) -> str:
+    """entry 本文の整形。長文は head+tail (末尾の「詳細: <path>」ポインタを保全)。"""
+    t = e.get("text", "")
+    if len(t) <= cap:
+        return t
+    return t[:cap - 110] + "\n…\n" + t[-100:]
+
+
+def flush_notify_digest(dry_run: bool = False) -> int:
+    """queue を 1 通に集約して line_push。空なら何もしない (=0)。戻り値は配信件数。
+
+    ★cross-check 反映 (2026-07-20):
+    - rename-drain 方式: queue を .draining へ atomic rename してから読む。truncate 方式だと
+      container writer (owner_memory 等) の append が read〜truncate 窓で消えていた
+      (bind mount 越しの flock は host↔container 間で無効 = Docker Desktop virtiofs の実態)。
+      rename 後の新規 append は新 queue file へ入り、消えない。
+    - 21 件目以降は捨てず queue へ書き戻して次回 flush へ持ち越し
+    - 配信済 entry は notify_digest_sent.jsonl に監査保存 (housekeeping が rotate)
+    - 成否確定点で loud_fail (§1.18 — 17+ 系統の配達を集約した単一 chokepoint のため必須)
+    """
+    import time as _time
+    refresh_line_quota()  # 1日2回のここが月次枠 snapshot の更新点 (§1.18 枯渇の事前検知)
+    draining = NOTIFY_DIGEST_QUEUE.with_suffix(".draining.jsonl")
+    try:
+        if not draining.exists():  # 前回失敗の持ち越しがあればそれを先に処理
+            if not NOTIFY_DIGEST_QUEUE.exists():
+                return 0
+            os.rename(NOTIFY_DIGEST_QUEUE, draining)
+            _time.sleep(0.05)  # rename 直前に open 済みの in-flight write を着地させる
+        lines = [ln for ln in draining.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        if not lines:
+            draining.unlink(missing_ok=True)
+            return 0
+        entries = []
+        for ln in lines:
+            try:
+                entries.append(json.loads(ln))
+            except Exception:
+                entries.append({"ts": "", "component": "raw", "text": ln[:500]})
+        send, carry = entries[:DIGEST_MAX_PER_FLUSH], entries[DIGEST_MAX_PER_FLUSH:]
+        parts = [f"🤖 Umiyama AI Agent — まとめ ({len(send)}件"
+                 + (f"、他 {len(carry)} 件は次回" if carry else "") + ")"]
+        for e in send:
+            parts.append(f"\n■ {e.get('component', 'info')} ({e.get('ts', '')})\n{_digest_entry_text(e)}")
+        msg = "\n".join(parts)[:4500]
+        if dry_run:
+            logger.info(f"[dry-run] digest {len(send)} 件:\n{msg[:500]}")
+            return len(send)
+        # bypass_cap: digest は最大 20 件の集約なので **日次** cap で止めない (2026-08-17
+        # デッドロック修正)。ただし **月枠** は critical のために温存する — 残り MONTH_RESERVE
+        # 通を切ったら info の集約配信は止め、queue に持ち越して翌月に回す (bot 死亡通知等の
+        # 配達保証を info より優先。ここで止めても drop ではないので情報は失われない)。
+        _reserve = int(os.getenv("NOTIFY_DIGEST_MONTH_RESERVE", "5"))
+        try:
+            _q = json.loads((IMPROVE_DIR / ".line_quota_month.json").read_text(encoding="utf-8"))
+            _left = int(_q.get("limit") or 0) - int(_q.get("used") or 0)
+        except Exception:
+            _left = 10 ** 6            # 取得失敗は fail-open (従来どおり送る)
+        if _left <= _reserve:
+            logger.warning(f"digest flush: 月枠の残り {_left} 通 ≤ 予備 {_reserve} → "
+                           "critical 温存のため今回は送らず持ち越し")
+            return 0
+        ok = line_push(msg, allow_digest=False, bypass_cap=True)
+        loud_fail("notify_digest_flush", ok, detail="info 通知まとめ配信", threshold=3, cooldown_h=24)
+        if not ok:
+            logger.warning("digest flush の line_push 失敗 → draining 保持 (次回持ち越し)")
+            return 0
+        # 配信済を監査 log へ、超過分は queue へ書き戻し
+        try:
+            sent_log = NOTIFY_DIGEST_QUEUE.with_name("notify_digest_sent.jsonl")
+            with open(sent_log, "a", encoding="utf-8") as f:
+                for e in send:
+                    f.write(json.dumps(e, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+        for e in carry:
+            line_push_digest(e.get("text", ""), e.get("component", "info"))
+        draining.unlink(missing_ok=True)
+        return len(send)
+    except Exception as e:
+        logger.warning(f"digest flush failed: {type(e).__name__}: {e}")
+        loud_fail("notify_digest_flush", False, detail=f"flush 例外: {e}", threshold=3, cooldown_h=24)
+        return 0
 
 
 # ★2026-07-02 監査 バッチC (loud-fail 標準、CLAUDE.md §1.18): 背景プロセスの silent 死対策の
@@ -507,6 +793,22 @@ def _replace_section(path: Path, anchor: str, new_content: str) -> bool:
     return True
 
 
+
+def _ensure_frontmatter(content: str) -> str:
+    """新規 wiki に frontmatter を必ず付ける (★2026-08-06)。
+
+    frontmatter が無い wiki は visibility の fail-safe で **private** に落ちる。
+    実測: 自動生成された 63 件が全て private = 社員クローンから永久に読めず、
+    knowledge_gap の自動修正アームが「書いた瞬間に見えない場所へ落ちる」状態だった。
+    既定は internal (人が確認して public へ昇格させる) = 未レビュー文を社員に晒さない。
+    """
+    if content.lstrip().startswith("---"):
+        return content
+    today = datetime.now(JST).strftime("%Y-%m-%d")
+    return (f"---\nupdated: {today}\nconfidence: medium\n"
+            f"clone_visibility: internal\nreview: pending\n---\n" + content.lstrip("\n"))
+
+
 def safe_write_wiki(rel: str, content: str, mode: str = "append", section_anchor: str = "") -> bool:
     """wiki ファイルを安全に作成/追記/部分置換。
 
@@ -521,7 +823,7 @@ def safe_write_wiki(rel: str, content: str, mode: str = "append", section_anchor
     if mode == "create":
         if p.exists():
             return False
-        p.write_text(content, encoding="utf-8")
+        p.write_text(_ensure_frontmatter(content), encoding="utf-8")
         return True
     if mode == "append":
         with p.open("a", encoding="utf-8") as f:

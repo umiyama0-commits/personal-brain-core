@@ -34,7 +34,7 @@ def test_am_keywords_contains_6_managers():
     assert m
     body = m.group(1)
     # store-master.md にある 6 AM
-    must = ["見本AM一子", "見本AM二郎", "見本AM三郎", "見本AM四郎", "見本AM五郎", "見本AM六郎"]
+    must = ["谷口里美", "中田将也", "渡邉俊也", "田口裕一朗", "熊野篤", "平林真之"]
     for name in must:
         assert name in body, f"AM_KEYWORDS に {name} が含まれてない"
 

@@ -24,18 +24,18 @@ def _isolate(tmp_path, monkeypatch):
 # ─── メモリ ───
 
 def test_add_and_parse_roundtrip():
-    assert om.add_entry("facts", "出張の定宿はサンプルホテル")
+    assert om.add_entry("facts", "福岡出張の定宿はホテルオークラ")
     assert om.add_entry("preferences", "資料は結論先出しが好み")
     entries = om.parse_entries()
     assert len(entries) == 2
     assert entries[0]["section"] == "facts"
-    assert "サンプルホテル" in entries[0]["text"]
+    assert "オークラ" in entries[0]["text"]
 
 
 def test_add_dedup_normalized():
-    assert om.add_entry("facts", "定宿はサンプルホテル。")
+    assert om.add_entry("facts", "定宿はオークラ。")
     # 句読点/空白ゆらぎは同一視
-    assert not om.add_entry("facts", "定宿はサンプルホテル")
+    assert not om.add_entry("facts", "定宿はオークラ")
     assert len(om.parse_entries()) == 1
 
 
@@ -163,10 +163,10 @@ def test_pending_reminders_listed_in_display():
 
 def test_memory_command_flow():
     assert "空です" in om.handle_memory_command("/memory")
-    resp = om.handle_memory_command("/memory add 定宿はサンプルホテル")
+    resp = om.handle_memory_command("/memory add 定宿はオークラ")
     assert "記憶しました" in resp
     listing = om.handle_memory_command("/memory")
-    assert "サンプルホテル" in listing and "1." in listing
+    assert "オークラ" in listing and "1." in listing
     resp = om.handle_memory_command("/memory del 1")
     assert "削除" in resp
     assert om.parse_entries() == []
@@ -201,15 +201,15 @@ class _FakeHttp:
 
 def test_extract_from_turn_saves_items_as_auto():
     http = _FakeHttp(json.dumps({"items": [
-        {"section": "facts", "text": "定宿はサンプルホテル"},
+        {"section": "facts", "text": "定宿はオークラ"},
         {"section": "ongoing", "text": "X社と提携協議中"},
         {"section": "bogus", "text": "捨てられる"},
     ]}))
-    n = asyncio.run(om.extract_from_turn(http, "来月の出張はいつものサンプルホテルで", "承知しました", "http://x", "k"))
+    n = asyncio.run(om.extract_from_turn(http, "来月の福岡はいつものオークラで", "承知しました", "http://x", "k"))
     assert n == 2
     entries = om.parse_entries()
     texts = [e["text"] for e in entries]
-    assert "定宿はサンプルホテル" in texts and "X社と提携協議中" in texts
+    assert "定宿はオークラ" in texts and "X社と提携協議中" in texts
     assert all(e["auto"] for e in entries)  # 自動抽出は auto tag 付き
 
 

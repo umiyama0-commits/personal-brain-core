@@ -153,7 +153,7 @@ def save_state(state: dict) -> None:
 
 # ★2026-05-26 海山指示 Phase 1: bot 検索 default の mime filter (= PDF 含む)
 # 画像 / 動画 / フォルダ / 圧縮 等は bot 検索 default で除外、ノイズ削減。
-# ★2026-06-07 海山指示「サンプルリンク新規出店PJ (.pptx) が出ない」修正:
+# ★2026-06-07 海山指示「クリエイトリンク包括出店PJ (.pptx) が出ない」修正:
 #   Google ネイティブ + PDF だけだと Office 形式 (.pptx/.xlsx/.docx) が検索から漏れる
 #   (= bot は既に BINARY_DOWNLOAD でこれらを取込・extract 済なのに検索不可は不整合)。
 #   PowerPoint / Excel / Word を default 検索対象に追加。画像・動画・圧縮は引き続き除外。
@@ -656,9 +656,50 @@ def fetch_and_save(
 #  (h) 機密 / 社外秘
 #  (i) credentials / secret
 #  (k) 相談 / 面談 / 個別 communication (★2026-05-27 海山指示)
+# ★2026-08-09: **ドライブ単位**の取り込み禁止 (ファイル名 filter の手前に置く最初の門)。
+# 背景: DEFAULT_EXCLUDE_PATTERN はファイル名しか見ないため、「共有ドライブごと入れてはいけない」
+# という単位の意思を表現できなかった。実際 umiyama-ai は共有ドライブ「人事評価シート」に
+# アクセスでき、名前に評価 marker を持たないファイル (例: 店舗別の集計シート) は素通りする。
+# 議事録の一括取込を始めるにあたり、**ドライブ名/ID で先に丸ごと落とす**層を置く。
+# ここに足したものは folder_id 指定でも recursive 走査でも入らない (fail-closed)。
+DENY_DRIVE_NAMES: frozenset = frozenset({
+    "人事評価シート",          # §1.9 (a) 人事評価
+    "情報セキュリティ委員会",   # インシデント記録 (未公表の脆弱性/事故)
+    "リスク管理委員会",         # 同上 + §1.9 (k) 相談/通報系
+})
+
+
+def is_denied_drive(drive, drive_or_folder_id: str, _cache: dict = {}) -> bool:
+    """共有ドライブ単位の取り込み禁止判定。判定不能なら **禁止側に倒す** (fail-closed)。"""
+    if not drive_or_folder_id:
+        return False
+    if drive_or_folder_id in _cache:
+        return _cache[drive_or_folder_id]
+    try:
+        if drive_or_folder_id.startswith("0A"):      # 共有ドライブ ID そのもの
+            name = drive.drives().get(driveId=drive_or_folder_id,
+                                      fields="name").execute().get("name", "")
+        else:                                        # フォルダ → 所属ドライブを引く
+            meta = drive.files().get(fileId=drive_or_folder_id, fields="driveId",
+                                     supportsAllDrives=True).execute()
+            did = meta.get("driveId")
+            if not did:
+                _cache[drive_or_folder_id] = False   # マイドライブ配下 = 対象外
+                return False
+            name = drive.drives().get(driveId=did, fields="name").execute().get("name", "")
+    except Exception as e:
+        logger.warning(f"drive denylist 判定不能 ({drive_or_folder_id}): {e} → 禁止側に倒す")
+        return True
+    denied = name in DENY_DRIVE_NAMES
+    if denied:
+        logger.warning(f"★取り込み禁止ドライブ: {name} ({drive_or_folder_id})")
+    _cache[drive_or_folder_id] = denied
+    return denied
+
+
 DEFAULT_EXCLUDE_PATTERN = (
     # (a) 人事評価 / 給与 / 考課 系
-    r"(人事評価|個人評価|給与|考課|処遇|"
+    r"(人事評価|個人評価|給与|考課|処遇|評価シート|ヒアリングシート|目標設定シート|"
     # (b) 退職 / 休職 / 離職 / 休業
     r"退職|休職|離職|休業|休暇申請|"
     # (c) 採用 / 選考 / 面接 / 履歴書 (★expand)
@@ -985,6 +1026,11 @@ def sync_folder(
     files_state = folder_state.setdefault("files", {})
 
     logger.info(f"=== Sync folder: label={label} folder_id={folder_id} ===")
+    # ★2026-08-09: ファイル名 filter の **手前** に置く最初の門。
+    #   ここで落ちたものは 1 件も列挙しない (= 名前を見る前に丸ごと止める)。
+    if is_denied_drive(drive, folder_id):
+        logger.warning(f"  取り込み禁止ドライブのため skip: label={label}")
+        return {"label": label, "skipped": "denied_drive", "imported": 0, "files": []}
     logger.info(
         f"  filters: recursive={recursive} max_age={max_age_days}d "
         f"pattern={pattern!r} exclude={exclude_pattern!r} max_files={max_files}"

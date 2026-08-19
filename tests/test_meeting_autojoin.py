@@ -50,7 +50,7 @@ def test_normal_internal_meeting_joins():
 
 def test_denylist_blocks_sensitive_meetings():
     # 実カレンダーで実在した「CFO面接」含む録音除外 policy の代表例
-    for title in ["CFO面接　候補者A", "人事評価 会議", "田中さん 1on1",
+    for title in ["CFO面接　Akikoさん", "人事評価 会議", "田中さん 1on1",
                   "M&A 検討", "弁護士 打合せ", "健康診断 結果説明",
                   "ハラスメント相談窓口 定例", "営業定例 [no-ai]"]:
         ok, reason = should_join(_ev(summary=title), NOW)
@@ -113,7 +113,7 @@ def test_two_person_meeting_skipped_as_de_facto_1on1():
         {"email": "ceo@owndays.co.jp", "self": True, "responseStatus": "needsAction"},
         {"email": "colleague1@owndays.co.jp", "responseStatus": "accepted"},
     ]
-    ok, reason = should_join(_ev(summary="Weekly Catchup: Colleague1 <> Umiyama-San",
+    ok, reason = should_join(_ev(summary="Weekly Catchup: Andy <> Umiyama-San",
                                  attendees=two), NOW)
     assert not ok and reason == "two_person"
     ok2, _ = should_join(_ev(summary="Weekly Catchup [ai-ok]", attendees=two), NOW)

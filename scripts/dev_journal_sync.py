@@ -49,7 +49,17 @@ DEV_DIR = (ROOT / "data" / "brain" / "wiki" / "personal" / "dev").resolve()
 SESSION_DIRS = [
     Path(os.path.expanduser("~/.claude/projects/-Users-brain-brain-agent-data")),
     Path(os.path.expanduser("~/.claude/projects/-Users-brain-brain-agent")),
+    # ★2026-07-25 海山「Claude code の開発履歴は記憶されている?」→ 実測でほぼ空と判明し追加。
+    #   開発の主戦場は MacBook 側 (`-Users-umiyamatakeshi-brain-agent*`) だが、この cron は
+    #   Mac Studio で走るため MacBook のファイルが見えず、上 2 dir だけを見て空振りしていた
+    #   (wiki/personal/dev/ が 3 件・2026-07-07 で停止)。MacBook の
+    #   scripts/dev_journal_push.sh が JSONL をここへ配送し、蒸留/書込は従来どおり本 script。
+    #   flatten 配送だが session id が UUID のため衝突せず、state の増分 offset も正しく効く。
+    Path(os.path.expanduser("~/.claude/projects/_macbook-brain-agent")),
 ]
+# 追加 dir は env で足せる (`:` 区切り。運用中の別マシン追加を code 変更なしで)
+SESSION_DIRS += [Path(os.path.expanduser(p)) for p in
+                 os.getenv("DEV_JOURNAL_EXTRA_DIRS", "").split(":") if p.strip()]
 
 MIN_NEW_CHARS = 400            # 新規区間がこれ未満なら蒸留しない (雑多な短い増分を無視)
 WINDOW_CAP = 40_000            # LLM に渡す区間の上限 (超過は末尾優先=直近の判断)
@@ -64,8 +74,23 @@ SENSITIVE_RE = re.compile(
 )
 # secret 形状 → redact
 SECRET_RE = re.compile(
-    r"(sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{12,}|xox[baprs]-[A-Za-z0-9-]{10,}|"
-    r"ghp_[A-Za-z0-9]{20,}|Bearer\s+[A-Za-z0-9._\-]{20,}|-----BEGIN [A-Z ]+PRIVATE KEY-----)"
+    # ★2026-08-03 実測で穴を検出: 旧 `sk-[A-Za-z0-9]{16,}` は **ハイフンで止まる**ため、
+    # 本システム自身が使う Anthropic 形式 `sk-ant-api03-…` / `sk-litellm-…` が素通りしていた。
+    # 加えて `KEY=値` / `PASS="値"` 形式の代入も対象外だった (gitleaks 側にはある rule)。
+    # dev session には両方が頻出するため拡張する。
+    r"(sk-[A-Za-z0-9_\-]{16,}|AKIA[0-9A-Z]{12,}|xox[baprs]-[A-Za-z0-9-]{10,}|"
+    r"ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|gho_[A-Za-z0-9]{20,}|"
+    r"Bearer\s+[A-Za-z0-9._\-]{20,}|-----BEGIN [A-Z ]+PRIVATE KEY-----|"
+    # KEY / TOKEN / SECRET / PASS(WORD) への代入 (値が 6 文字以上)
+    # ★§1.15 Reviewer M2: 当初は識別子の **先頭側** しかワイルドカードにしておらず、
+    # `LITELLM_MASTER_KEY=` `BRAIN_EXTENSION_KEY=` (API_?KEY 非該当) と
+    # `AWS_SECRET_ACCESS_KEY=` (SECRET の後に _ が続く) が素通りしていた。
+    # 前者 2 つは本 repo の dev セッションに最頻出の secret (§1.17 の rotate 対象そのもの)。
+    # 識別子の **末尾側にも** ワイルドカードを許して閉じる。
+    # 値は **ASCII の資格情報らしい形** に限定 (8 文字以上)。当初 `[^\s...]{6,}` と広く取ったら
+    # 「この KEY: 設計を見直す」のような日本語の地の文まで潰した (会話ログが読めなくなる)。
+    r"(?i:[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS)[A-Z0-9_]*)"
+    r"\s*[=:]\s*[\"']?[A-Za-z0-9_\-./+=]{8,})"
 )
 # PB 開発に触れた区間か (repo/dev シグナル)。雑務 (browser errand 等) を除外
 DEV_SIGNAL_RE = re.compile(
@@ -154,6 +179,13 @@ def read_new(path: Path, start_offset: int) -> dict:
                        for role, text in turns)
     if len(body) > WINDOW_CAP:
         body = "…(前略)…\n\n" + body[-WINDOW_CAP:]
+    # ★2026-08-03 実測で判明した穴: SECRET_RE の redact は `_redact` → `_clean` 経由でしか
+    # 呼ばれず、`_clean` は **LLM 出力の markdown 書き出し時にしか**適用されていなかった。
+    # つまり LLM へ送る 40,000 字の window は完全に無加工で、開発セッション中に出た
+    # API key / token が平文で外部 (GPT-5.4) に渡っていた (実測 39 call / 518,435 token 送信済)。
+    # docstring は「機微ハードフィルタ」を謳っていたが入力側には成立していなかった。
+    # 送信前に redact を掛ける (出力側の _clean は frontmatter 無害化も兼ねるので据え置き)。
+    body = _redact(body)
     return {"window": body, "end": end, "date": _safe_day(day)}
 
 
@@ -199,7 +231,7 @@ JSON のみ返す:
 """
 
 
-async def distill(window: str, llm=None) -> dict | None:
+async def distill(window: str, llm=None, stats: dict | None = None) -> dict | None:
     llm = llm or call_llm
     try:
         raw = await llm(DISTILL_PROMPT.format(window=window), model=DISTILL_MODEL,
@@ -208,6 +240,11 @@ async def distill(window: str, llm=None) -> dict | None:
         raw = await llm(DISTILL_PROMPT.format(window=window), model=DISTILL_MODEL,
                         max_tokens=1500, temperature=0.2)
     except Exception as e:
+        # ★2026-07-25 §1.18: LLM 恒常失敗を silent にしない (呼び手が loud_fail へ集約)。
+        #   実際に発生: LITELLM_URL 未解決で 3 retry 全滅 → warning だけで pipeline は
+        #   "ok" を返していた (取込が無言で止まる = 本件の failure mode そのもの)。
+        if stats is not None:
+            stats["llm_fail"] = stats.get("llm_fail", 0) + 1
         logger.warning(f"distill LLM 失敗 (soft): {type(e).__name__}: {e}")
         return None
     try:
@@ -282,6 +319,7 @@ async def run(*, dry_run: bool = False, limit: int | None = None,
     seen = st.setdefault("seen", {})
     cap = limit if limit is not None else MAX_PER_RUN
     processed, written, skipped = 0, 0, 0
+    stats: dict = {"llm_fail": 0}
     for path in _find_sessions():
         sid = path.stem
         if session and sid != session:
@@ -313,7 +351,7 @@ async def run(*, dry_run: bool = False, limit: int | None = None,
             logger.info(f"  [dry] {sid[:8]} date={info['date']} chars={len(win)} "
                         f"sensitive={sensitive}")
             continue
-        rec = await distill(win, llm=llm)
+        rec = await distill(win, llm=llm, stats=stats)
         if rec:
             p = write_record(rec, sid, info["date"], info["end"], sensitive)
             written += 1
@@ -323,7 +361,12 @@ async def run(*, dry_run: bool = False, limit: int | None = None,
             logger.info(f"  判断なし/soft-skip: {sid[:8]}")
     if not dry_run:
         _save_state(st)
-    return {"ok": True, "processed": processed, "written": written, "skipped": skipped}
+    # ★2026-07-25 §1.18 loud-fail: 蒸留を試みたのに全滅 (LLM 断/URL 誤り) は取込の silent 死。
+    #   ok=False は「処理対象があったのに 1 件も蒸留できなかった」時のみ (対象ゼロ=正常なので ok)。
+    #   1 実行 1 箇所で記録 (streak 相殺を避ける)。cron からは cron_env.sh source 済で呼ばれる。
+    ok = not (processed > 0 and stats["llm_fail"] >= processed)
+    return {"ok": ok, "processed": processed, "written": written,
+            "skipped": skipped, "llm_fail": stats["llm_fail"]}
 
 
 def main() -> int:
@@ -331,9 +374,20 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true", help="検出だけ (蒸留/書込しない)")
     ap.add_argument("--limit", type=int, default=None, help=f"1回の上限 (default {MAX_PER_RUN})")
     ap.add_argument("--session", help="特定 session-id を頭から backfill (state 無視)")
+    ap.add_argument("--push", action="store_true",
+                    help="§1.18 loud_fail 通知も出す (cron 用)")
     a = ap.parse_args()
     r = asyncio.run(run(dry_run=a.dry_run, limit=a.limit, session=a.session))
     print(r)
+    if a.push and not a.dry_run:
+        try:
+            from clone_improve_lib import loud_fail
+            loud_fail("dev_journal_sync", bool(r.get("ok")),
+                      f"蒸留 {r.get('processed')} 件中 LLM 失敗 {r.get('llm_fail')} 件 "
+                      f"(書込 {r.get('written')})",
+                      threshold=2, cooldown_h=24.0)
+        except Exception as e:                      # 通知失敗で取込自体は落とさない
+            logger.warning(f"loud_fail 通知失敗 (非致命): {e}")
     return 0 if r.get("ok") else 1
 
 

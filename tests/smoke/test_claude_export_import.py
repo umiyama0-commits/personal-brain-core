@@ -25,7 +25,7 @@ def _export_data():
          "chat_messages": [{"sender": "human", "text": "OWNDAYS 売上の件 SECRET_O"}]},
         {"uuid": "conv-content-3", "name": "メモ",  # title は非Example だが content に Example
          "chat_messages": [{"sender": "human", "content": [{"type": "text",
-            "text": "Example Garden の資料を担当者から受領。現場暗黙知の構造化方針を相談したい。"}]}]},
+            "text": "Example Gardenの資料を明石さんから受領。現場暗黙知の構造化方針を相談したい。"}]}]},
     ]
 
 
@@ -36,7 +36,7 @@ def test_parse_handles_both_message_formats():
     assert convos[0]["messages"][0]["content"] == "現場暗黙知のオントロジー化 SECRET_T"
     assert convos[0]["messages"][0]["role"] == "user"
     # 新形式 content[].text
-    assert convos[2]["messages"][0]["content"].startswith("Example Garden の資料")
+    assert convos[2]["messages"][0]["content"].startswith("Example Gardenの資料")
 
 
 def test_is_example_conv_title_and_content():

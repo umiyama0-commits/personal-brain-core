@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -26,7 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from clone_improve_lib import (
     ensure_dirs, load_conversations, call_llm, extract_json,
-    append_jsonl, safe_write_wiki, wiki_path, line_push, loud_fail, supervisor_model,
+    append_jsonl, safe_write_wiki, wiki_path, line_push, line_push_digest, loud_fail, supervisor_model,
     IMPROVE_DIR, DRAFTS_DIR, QUEUE_DIR, AUTO_EDIT_LOG, WIKI_DIR, JST,
 )
 
@@ -166,6 +167,12 @@ def _drain_overflow_queue(now, budget: int) -> int:
         if not file_rel or not content or file_rel.startswith("drafts/"):
             qf.unlink(missing_ok=True)
             continue
+        # ★2026-08-06: 日次上限を超えて queue に落ちた分も同じガードを通す。
+        #   ここを素通りさせると「同じ事故が 1 日ずれて再発する」(cross-check DA 指摘)。
+        if _is_capability_denial(item):
+            logger.warning("能力否定の自動 wiki 化を却下 (overflow queue): %s", file_rel)
+            qf.unlink(missing_ok=True)
+            continue
         mode = {"create": "create", "append": "append",
                 "replace_section": "replace_section"}.get(op, "append")
         anchor = item.get("section_anchor", "") if op == "replace_section" else ""
@@ -184,6 +191,67 @@ def _drain_overflow_queue(now, budget: int) -> int:
             logger.info(f"drain discard (stale/no-op): {file_rel}")
         qf.unlink(missing_ok=True)
     return applied
+
+
+
+# ★2026-08-06: bot 自身の「データが無い」発話を根拠に **能力否定** を wiki 化させない。
+# 事故 (2026-08-05 18:54 → 翌 03:00): 店舗名の誤検出でクローンが「店舗別の売上データが
+# こっちにまだ流し込めてない」と誤答 → auto_improve がそれを evidence として
+# knowledge/store-sales-data-scope.md に「まだ答えられないもの: 店舗別の月次推移 /
+# 前年同月比 / 店舗別の履歴データ全般」と断定する節を新規作成した。実際には該当 3 ファイルは
+# 毎朝更新されており、誤答が一晩で「社内知識」に昇格していた。
+# クローンの否定応答は **retrieval が外れた証拠** であって **データ不在の証拠ではない**。
+_DENIAL_RE = re.compile(
+    r"流し込め|取り込(み|め)|データ(が)?(無|な)い|未連携|データ連携|未整備|"
+    r"持っていない|保有していない|入ってな|入っていな|見当たら|存在しな|出てこな|手元に(は)?(無|な)い")
+_CAPABILITY_CLAIM_RE = re.compile(
+    r"まだ答えられない|答えられないもの|対応(して)?いない|非対応|守備範囲外|"
+    r"データ(が)?(存在|ありませ)|未取得|未実装")
+
+
+def _is_capability_denial(item: dict) -> bool:
+    """能力否定を書こうとしていて、根拠が bot 自身の否定応答しかない編集を弾く。"""
+    content = str(item.get("content") or "")
+    if not _CAPABILITY_CLAIM_RE.search(content):
+        return False
+    quotes = " ".join(str(q) for q in (item.get("evidence_quotes") or []))
+    # 根拠が「bot がデータ無いと言った」だけなら、それは retrieval 失敗の証拠にすぎない
+    return bool(_DENIAL_RE.search(quotes)) or not quotes.strip()
+
+
+def _quotes_are_bot_only(item: dict, records: list) -> bool:
+    """根拠 (evidence_quotes) が **bot 自身の発話にしか無い** 編集か。
+
+    ★2026-08-16: 上の _is_capability_denial は語彙 allowlist なので、同じ意味を
+    「断定回答できない」「全期間を突合できず」と言い換えるだけで素通りする
+    (2026-08-16 に実証。2026-08-06 の対策が語彙一致に依存していたため 2 周目が起きた)。
+    語彙に依らない門として、根拠の帰属を見る: 人 (海山・社員) の発話に一度も
+    現れず bot の応答にしか無い引用は、**bot が自分の出力を根拠に社内知識を作る**
+    自己強化ループそのもの。値を捨てずに提案として残す (下流で propose-only 扱い)。
+
+    判定できない時 (records 空 / 引用が短すぎる) は False = 従来どおり通す
+    (fail-open。ここで止めすぎると正当な改善まで消える)。
+    """
+    quotes = [str(q).strip() for q in (item.get("evidence_quotes") or [])]
+    quotes = [q for q in quotes if len(q) >= 8]      # 短文は誤判定しやすい
+    if not quotes or not records:
+        return False
+    user_text, bot_text = [], []
+    for r in records:
+        if not isinstance(r, dict):
+            continue
+        body = str(r.get("content") or r.get("text") or "")
+        (bot_text if str(r.get("role")) == "assistant" else user_text).append(body)
+    user_blob, bot_blob = "\n".join(user_text), "\n".join(bot_text)
+    if not bot_blob:
+        return False
+    found_in_bot = False
+    for q in quotes:
+        if q in user_blob:
+            return False                              # 人の発話が根拠にある → 通す
+        if q in bot_blob:
+            found_in_bot = True
+    return found_in_bot
 
 
 async def main():
@@ -235,6 +303,19 @@ async def main():
             continue
         if file_rel.startswith("drafts/"):
             # drafts は applied 側に来ない設計、念のため弾く
+            continue
+        if _is_capability_denial(item):
+            logger.warning(
+                "能力否定の自動 wiki 化を却下 (根拠がクローン自身の否定応答): %s", file_rel)
+            continue
+        # ★2026-08-16: 語彙に依らない第二の門。根拠が bot の発話にしか無い編集は
+        #   自動適用せず drafts/ へ回す (捨てない = 人が見て採否を決める)。
+        if _quotes_are_bot_only(item, records):
+            _p = DRAFTS_DIR / f"{now:%Y%m%d-%H%M%S}-botonly-{Path(file_rel).name}.json"
+            _p.parent.mkdir(parents=True, exist_ok=True)
+            _p.write_text(json.dumps(item, ensure_ascii=False, indent=2), encoding="utf-8")
+            logger.warning(
+                "根拠がクローン自身の発話のみ → 自動適用せず提案に回す: %s", file_rel)
             continue
         try:
             # ★2026-06-07 エージェント評価: 旧 replace_section→overwrite map は section content で
@@ -305,7 +386,7 @@ async def main():
         for d in urgent_drafts[:3]:
             msg += f"- {d.get('reason', '')[:80]}\n"
         msg += f"\n詳細: /Users/brain/brain-agent/data/brain/clone_improve/drafts/"
-        line_push(msg)
+        line_push_digest(msg, "自動改善")
 
     logger.info(f"done. applied={applied_count} drafts={draft_count}")
     print(json.dumps(summary, ensure_ascii=False, indent=2))

@@ -27,7 +27,7 @@ JST = ZoneInfo("Asia/Tokyo")
 
 # LiteLLM proxy URL (= main.py から渡してもよいが、env で十分)
 LITELLM_URL = os.getenv("LITELLM_URL", "http://litellm:4000")
-LITELLM_KEY = os.getenv("LITELLM_MASTER_KEY", "")  # ★平文 default 禁止 (社内レビュー §3.1)
+LITELLM_KEY = os.getenv("LITELLM_MASTER_KEY", "")  # ★平文 default 禁止 (LEE §3.1)
 
 router = APIRouter(tags=["brain_api"])
 

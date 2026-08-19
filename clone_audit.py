@@ -23,7 +23,7 @@ bot:  ✓ audit 記録 (verdict=good)
 海山個人 LINE: /audit-recent
 bot: 直近 10 件:
   [1] 13:25 田中: 売上? → "今日 20M、客数 1228" (DM)
-  [2] 13:30 鈴木: ○○進捗? → "店長候補 3 名選考中" (group:ch_abc)
+  [2] 13:30 鈴木: 龍仁進捗? → "店長候補 3 名選考中" (group:ch_abc)
   [3] ...
 海山: × 1 数字古い、最新は 22M
 bot: ✓ #1 audit 記録: verdict=bad, note=数字古い、最新は 22M
@@ -361,17 +361,21 @@ def list_recent_unrated(
     # bot reply (= role=assistant) + その直前 user query を pair で抽出、未 audit のみ
     audited_ids = _load_audited_ids()
     unrated = []
-    seen_assistant_ts: set[str] = set()
+    seen_msg_ids: set[str] = set()
     for i, r in enumerate(all_records):
         if r.get("role") != "assistant":
             continue
         ts = r.get("timestamp", "")
-        if ts in seen_assistant_ts:
-            continue
-        seen_assistant_ts.add(ts)
         user_id = r.get("_user_id", "")
         bot_response = r.get("text", "")
+        # dedup は ts 単独でなく msg_id (= ts + user_id + response hash) で判定。
+        # clone_history の timestamp は秒精度 (isoformat timespec="seconds") のため、
+        # 別 user / 別内容の 2 応答が同一秒に記録されると ts 単独 dedup では後発 1 件が
+        # 無音で脱落 (= /audit-recent から消える)。msg_id 判定なら真の重複だけ畳む。
         msg_id = _make_msg_id(ts, user_id, bot_response)
+        if msg_id in seen_msg_ids:
+            continue
+        seen_msg_ids.add(msg_id)
         if msg_id in audited_ids:
             continue
         # 直前 user query 探す (= 同 user 直前の user role)

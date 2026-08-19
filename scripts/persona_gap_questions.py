@@ -22,7 +22,7 @@ JST = timezone(timedelta(hours=9))
 sys.path.insert(0, str(Path(__file__).resolve().parent))         # scripts/ sibling
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))     # repo root (alignment_interview)
 
-from clone_improve_lib import call_llm, line_push                 # noqa: E402  CI-safe
+from clone_improve_lib import call_llm, line_push, line_push_digest  # noqa: E402  CI-safe
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("persona_gap_questions")
@@ -75,7 +75,7 @@ def _skip_for_cadence(cadence: str, now: datetime | None = None) -> bool:
 
 
 async def run(*, dry_run: bool = False, llm=None, push_fn=None, get_thin=None) -> dict:
-    push_fn = push_fn or line_push
+    push_fn = push_fn or (lambda t: line_push_digest(t, "人格質問"))  # ★2026-07-20 通知削減
     get_thin = get_thin or _get_thin_dims
     try:
         thin = get_thin(N_DIMS)

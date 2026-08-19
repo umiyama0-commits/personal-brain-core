@@ -90,7 +90,7 @@ class _StubBrain:
         self.index = index
 
 
-_HIT = {"content": "全店売上 週次合計 9,876,543,210 円。", "source": "wiki/knowledge/x.md",
+_HIT = {"content": "全店売上 週次合計 1,246,505,040 円。", "source": "wiki/knowledge/x.md",
         "metadata": {"title": "Monday Dash 最新"}, "distance": 0.2, "collection": "wiki"}
 
 
@@ -156,12 +156,12 @@ def test_search_dedups_sources_and_caps_length():
 
 
 def test_truncation_never_cuts_mid_number():
-    """240 字 cut が数値の桁中に落ちる時、部分数字 (「9,876,」等) を残さない
+    """240 字 cut が数値の桁中に落ちる時、部分数字 (「1,246,」等) を残さない
     (LLM が確信を持って誤補完する音声数字事故の防止 = DA シナリオ2)。"""
-    hits = [dict(_HIT, content=("あ" * 235) + "9,876,543,210円")]
+    hits = [dict(_HIT, content=("あ" * 235) + "1,246,505,040円")]
     brain = _StubBrain(_StubIndex(hits=hits))
     out = _run(vt.search_brain_for_voice(brain, "q"))
-    assert "9,876," not in out  # 桁途中の断片が出ない (数値ごと落ちる)
+    assert "1,246," not in out  # 桁途中の断片が出ない (数値ごと落ちる)
 
 
 def test_formatting_strips_markdown_noise():

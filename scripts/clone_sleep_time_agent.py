@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from clone_improve_lib import call_llm, line_push
+from clone_improve_lib import call_llm, line_push, line_push_digest
 
 logger = logging.getLogger("clone_sleep_time_agent")
 
@@ -175,7 +175,7 @@ SLEEP_TIME_PROMPT = """あなたは「うみやまAI」の sleep-time 整理エ�
    発生 / 確認日を `(YYYY-MM-DD)` 形式で付ける。
    - 新規追加項目: 現在日付 `({today})` を付与
    - 既存項目の更新: 元の日付は保持、追加情報部分に新日付付与
-   - 例: "- ○○モール出店 (2026-05-15)、店長候補 3 名 (2026-05-24)"
+   - 例: "- 龍仁モール出店 (2026-05-15)、店長候補 3 名 (2026-05-24)"
    - 例: "- 営業部所属 (2026-04-10)、現職 5 年目 (2026-04-10)"
 5. **古くなった情報は archive** — 30 日以上古い Ongoing は `(過去 YYYY-MM-DD)` 形式で
    Key Facts に降格、または「以前は〜だったが今は〜」 形式で update
@@ -296,7 +296,7 @@ async def sleep_time_run(user_id: str, dry_run: bool = False) -> dict:
             if not dry_run:
                 _save_shrink_draft(user_id, existing, updated)
                 try:
-                    line_push(f"⚠️ sleep_time: {user_id[:8]} の memory が {reason} → 上書き保留、drafts で確認を")
+                    line_push_digest(f"⚠️ sleep_time: {user_id[:8]} の memory が {reason} → 上書き保留、drafts で確認を", "memory整理")
                 except Exception:
                     pass
             logger.warning(f"[{user_id[:8]}] {reason} -> 上書きせず退避")

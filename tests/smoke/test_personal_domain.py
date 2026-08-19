@@ -62,6 +62,42 @@ def _seed_wiki(tmp_path):
     return wiki
 
 
+def test_consultant_search_excludes_personal(tmp_path):
+    """最高リスク面: コンサル brain_search が personal/ を絶対に返さない (= OWNDAYS 戦略に混入しない)。"""
+    import brain_search  # scripts/consultant/brain_search.py
+    wiki = _seed_wiki(tmp_path)
+    # 秘密マーカーで検索 → personal にしか無いので「0 件」でなければ leak
+    results = brain_search.search("ZZTOPSECRET", wiki_dir=wiki)
+    sources = [r["source"] for r in results]
+    assert all(not s.startswith("personal") for s in sources), f"personal leaked: {sources}"
+    # 念のため excerpt にも秘密が出ていないこと
+    assert all("ZZTOPSECRET" not in r["excerpt"] or not r["source"].startswith("personal")
+               for r in results)
+    # personal にしか無いマーカーなので、結果に含まれてはならない (OWNDAYS の owndays.md は
+    # 「ZZTOPSECRET は無い」と書いてあるだけ=語としては hit しうるが personal 本文は出ない)
+    joined = " ".join(r["excerpt"] for r in results if r["source"].startswith("personal"))
+    assert "評価額" not in joined
+
+
+def test_consultant_sections_catalog_hides_personal(tmp_path):
+    """catalog (system prompt grounding) に personal の存在自体を出さない。"""
+    import brain_search
+    wiki = _seed_wiki(tmp_path)
+    cat = brain_search.sections_catalog(wiki_dir=wiki)
+    assert "personal" not in cat
+    assert "knowledge" in cat   # OWNDAYS は出る (over-exclusion してない)
+
+
+def test_consultant_search_still_finds_owndays(tmp_path):
+    """除外し過ぎていないこと: OWNDAYS 内容は従来どおり引ける。"""
+    import brain_search
+    wiki = _seed_wiki(tmp_path)
+    results = brain_search.search("売上 戦略", wiki_dir=wiki)
+    assert any(r["source"].startswith("knowledge") for r in results), "OWNDAYS が引けない (過剰除外)"
+
+
+# ── ★2026-06-28 Personal Brain Core + registry ──
+
 def test_domain_registry_classification():
     """domain_of / is_core_rel / is_owndays_facing の3ドメイン分類。"""
     assert domain_of("style.md") == "core"

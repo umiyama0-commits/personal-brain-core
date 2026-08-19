@@ -383,7 +383,7 @@ def digest_only(dry_run: bool = False) -> str:
     digest = build_approval_digest(snapshot=not dry_run)
     print(digest)
     if not dry_run and digest:
-        line_push(f"✅ 承認待ち (押すだけで減る)\n{digest[:4000]}")
+        line_push(f"✅ 承認待ち (押すだけで減る)\n{digest[:4000]}", critical=True)
         logger.info("digest push sent")
     return digest
 
@@ -458,7 +458,7 @@ async def main():
     # ★2026-07-02 P1b: 承認ダイジェストは「読む」でなく「押す」導線 → 別 push で全文届ける
     # (レポート本体の先頭30行 push には載らないため、one-tap コマンドが埋もれない)
     if digest:
-        line_push(f"✅ 承認待ち (押すだけで減る)\n{digest[:4000]}")
+        line_push(f"✅ 承認待ち (押すだけで減る)\n{digest[:4000]}", critical=True)
 
 
 if __name__ == "__main__":

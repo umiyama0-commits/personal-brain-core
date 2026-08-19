@@ -70,7 +70,7 @@ def test_is_substantive():
     assert mod._is_substantive("OK") is False
     assert mod._is_substantive("ありがとう。") is False
     # 80 字以上の中身ある応答は True
-    long_resp = "関東Aエリアの売上は 1,500,000 円、客数 100 でした。" * 3
+    long_resp = "関東Aエリアの売上は 1,777,111 円、客数 149 でした。" * 3
     assert mod._is_substantive(long_resp) is True
 
 
@@ -80,7 +80,7 @@ def test_sample_turns_pairs_user_assistant():
     import clone_hallucination_check as mod
     records = [
         {"user_id": "u1", "role": "user", "text": "売上は?", "timestamp": "2026-05-21T10:00:00+09:00"},
-        {"user_id": "u1", "role": "assistant", "text": "全社売上は今日 16,000,000 円、客数 1,000 人、客単価 16,000 円でした。関東A エリアは 1,500,000 円で 100 人、九州A エリアは 1,400,000 円で 100 人。今日は週末でやや高め。", "timestamp": "2026-05-21T10:00:30+09:00"},
+        {"user_id": "u1", "role": "assistant", "text": "全社売上は今日 20,325,213 円、客数 1,228 人、客単価 16,551 円でした。関東A エリアは 1,777,111 円で 149 人、九州A エリアは 1,567,572 円で 112 人。今日は週末でやや高め。", "timestamp": "2026-05-21T10:00:30+09:00"},
         {"user_id": "u1", "role": "user", "text": "ありがとう", "timestamp": "2026-05-21T10:01:00+09:00"},
         {"user_id": "u2", "role": "user", "text": "店舗?", "timestamp": "2026-05-21T11:00:00+09:00"},
         {"user_id": "u2", "role": "assistant", "text": "OK", "timestamp": "2026-05-21T11:00:30+09:00"},  # 短すぎ → 除外

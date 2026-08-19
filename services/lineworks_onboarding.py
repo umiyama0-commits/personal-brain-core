@@ -48,10 +48,13 @@ WELCOME_TEXT = (
 
 # 例文ボタン: label がそのまま送信クエリになる (≤20 chars 制約、postback 無し = 通常フロー処理)。
 # ★本番 green のクエリのみ (売上=owndays-daily-sales/monday-dash core、戦略=canon 常駐)。
-# 制度・商圏系は #2 (規程 Drive 403 修理) / URL 露出の海山判断が済んでから追加する。
+# ★2026-08-10 (再ローンチ総点検): 規程FAQ の例文を追加。旧コメント「制度系は Drive 403 で
+#   未取込のため載せない」は stale — 規程 54 PDF は 07-13 取込済で、索引欠落も
+#   _initial_reindex の reconcile (同日 deploy) で解消。制度質問は社員の頻出領域なのに
+#   入口に出ていなかった (44% 無言離脱の一因)。
 EXAMPLE_QUERIES = (
     "今月の全社売上は?",
-    "先週の売上は?",
+    "公休は年間何日?",
     "OWNDAYSの戦略は?",
 )
 

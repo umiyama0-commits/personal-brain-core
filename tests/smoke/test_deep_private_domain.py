@@ -73,6 +73,34 @@ def _seed_wiki(tmp_path):
 
 # ── OWNDAYS-facing consumers (leak したら fail) ──
 
+def test_consultant_search_excludes_interview(tmp_path):
+    import brain_search  # scripts/consultant/brain_search.py
+    wiki = _seed_wiki(tmp_path)
+    results = brain_search.search(MARK, wiki_dir=wiki)
+    sources = [r["source"] for r in results]
+    assert all(not s.startswith(("interview", "personal")) for s in sources), \
+        f"deep private leaked: {sources}"
+    cat = brain_search.sections_catalog(wiki_dir=wiki)
+    assert "interview" not in cat and "personal" not in cat
+    assert "knowledge" in cat  # 過剰除外していない
+
+
+def test_consultant_fallback_matches_domain_definition():
+    """stdlib fallback (_deep_private_fallback) が単一真実源と drift していないこと。
+
+    ★Reviewer SF4: _is_deep_private_rel は import 成功環境では domain.py の同一オブジェクトに
+    なるため比較がトートロジー化する → **常時定義の fallback 関数そのもの** を比較し、
+    DEEP_PRIVATE_DIRS へ dir を足した時に fallback の追従漏れを CI で検出する。"""
+    import brain_search
+    for rel in ("interview/a.md", "personal/p/a.md", "knowledge/k.md",
+                "interviewish/x.md", "style.md", ""):
+        assert brain_search._deep_private_fallback(rel) == is_deep_private_rel(rel), rel
+    # DEEP_PRIVATE_DIRS 網羅 (3 語目が足されたら fallback 未追従で fail する)
+    for d in DEEP_PRIVATE_DIRS:
+        assert brain_search._deep_private_fallback(f"{d}/x.md") is True, \
+            f"fallback が DEEP_PRIVATE_DIRS の '{d}' に未追従 (scripts/consultant/brain_search.py)"
+
+
 def test_brain_graph_excludes_interview(tmp_path):
     import brain_graph
     wiki = _seed_wiki(tmp_path)
@@ -243,7 +271,12 @@ def test_brain_auth_tier_admin_gate_source_level():
     src = (ROOT / "main.py").read_text(encoding="utf-8")
     i = src.find("def brain_auth_tier")
     assert i > 0, "brain_auth_tier が無い (Brain Map admin ゲートの本体)"
-    body = src[i:i + 1800]
+    # ★2026-07-14: 固定窓だと隣接関数 (require_admin_key の docstring) を拾い誤検知するため、
+    # 次の top-level def / @app まで = brain_auth_tier 関数本体だけに厳密化。
+    _rest = src[i + 3:]
+    _end = min([p for p in (_rest.find("\ndef "), _rest.find("\n@app"), _rest.find("\n# ─"))
+                if p != -1] or [1800])
+    body = src[i:i + 3 + _end]
     assert "hmac.compare_digest(key, BRAIN_EXTENSION_KEY)" in body, \
         "brain_auth_tier が BRAIN_EXTENSION_KEY を compare_digest で照合していない"
     assert 'return "admin"' in body and 'return "token"' in body
@@ -339,14 +372,37 @@ def test_indexing_keeps_interview_deliberately_source_level():
 
 def test_include_interview_optin_does_not_proliferate_source_level():
     """DA cross-check 6: include_interview=True (海山 admin opt-in) が「便利 flag」として
-    非 admin 経路へコピペ増殖しないよう、出現箇所を 2 (= /clone と alignment 質問生成) に固定。
-    正当に増やす時はこの test と ADR の非対象リストを同時更新すること。"""
+    非 admin 経路へコピペ増殖しないよう、出現箇所を固定。
+
+    ★2026-08-03 で 2 → 1 に減った: alignment 質問生成が wiki 全文注入をやめ、
+    _build_coverage_digest (構造サマリ) に切り替わったため (下の test で別途 pin)。
+    **減る分は安全側**。増やす時はこの test と ADR の非対象リストを同時更新すること。"""
     src = (ROOT / "brain_wiki.py").read_text(encoding="utf-8")
     calls = [ln for ln in src.splitlines()
              if "include_interview=True" in ln and "_read_wiki_state(" in ln
              and not ln.strip().startswith("#")]
-    assert len(calls) == 2, \
-        f"include_interview=True の実呼び出しが {len(calls)} 箇所 (期待 2 = /clone と alignment 質問生成)"
+    assert len(calls) == 1, \
+        f"include_interview=True の実呼び出しが {len(calls)} 箇所 (期待 1 = /clone のみ)"
+
+
+def test_coverage_digest_reads_interview_headings_only():
+    """★2026-08-03: alignment 質問生成の interview アクセスは _read_wiki_state から
+    _build_coverage_digest へ移った。上の pin の死角にならないよう、この経路も固定する。
+
+    不変条件: (a) interview/ を意図的に含む (「既に聞いた領域」を知るため = 海山専用)
+    (b) 含めるのは path + 見出しのみで **本文は送らない** (c) personal/ 等ほかの
+    deep_private は従来どおり除外。ここが本文 dump に戻ると、深層人格が丸ごと LLM に出る。"""
+    src = (ROOT / "brain_wiki.py").read_text(encoding="utf-8")
+    i = src.find("def _build_coverage_digest")
+    assert i > 0, "_build_coverage_digest が消えた (alignment 質問生成の経路変更?)"
+    body = src[i:i + 4000]
+    assert "is_deep_private_rel(rel)" in body, \
+        "_build_coverage_digest の deep_private 除外が消えた (personal/ が流入する)"
+    assert 'rel.startswith("interview/")' in body, \
+        "interview/ の意図的 include が消えた (薄い次元が分からず質問が劣化)"
+    # 本文を送らないこと: read_text の結果をそのまま積む実装に戻っていないか
+    assert "f.read_text" not in body or "head" in body, \
+        "_build_coverage_digest が本文を積んでいる疑い (見出しのみの契約が壊れた)"
 
 
 def test_build_context_public_only_covers_all_deep_private_dirs():

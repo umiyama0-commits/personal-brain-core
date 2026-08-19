@@ -259,13 +259,13 @@ def run(*, dry_run: bool = False, max_n: int = 30, push: bool = False,
     logger.info(f"queue 追加 {added} 件 (候補 {len(cands)})")
     if push and added:
         try:
-            from clone_improve_lib import line_push
+            from clone_improve_lib import line_push_digest
             top = list_pending(BRAIN_ROOT)[:3]
             preview = "\n".join(
                 f"・{_side_label(r['from'])} ↔ {_side_label(r['to'])}\n  ({_display_why(r)})"
                 for r in top)
-            line_push(f"🌉 Brain Map の「記憶の接続」提案が {added} 件届きました。例:\n{preview}\n"
-                      f"→ /bridge で全一覧、/bridge ok all で一括承認 (承認まで graph 不変)")
+            line_push_digest(f"🌉 Brain Map の「記憶の接続」提案が {added} 件届きました。例:\n{preview}\n"
+                      f"→ /bridge で全一覧、/bridge ok all で一括承認 (承認まで graph 不変)", "接続提案")
         except Exception as e:
             logger.warning(f"LINE push 失敗: {e}")
     return {"ok": True, "added": added, "candidates": len(cands)}

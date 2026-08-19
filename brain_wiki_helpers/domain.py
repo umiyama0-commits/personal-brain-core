@@ -5,7 +5,7 @@ brain_wiki_helpers/domain.py — 知識ドメイン registry (★2026-06-28)
  - **Core 層** = project 非依存の海山丈司 基盤 (人格・文体・判断軸・趣向)。どのドメインでも「基盤」
    として使える。各PJの知見はここに**還流**する (還流の自動蒸留+承認は次段、ADR 参照)。
  - **OWNDAYS domain** = 事業の1つ (knowledge/ analysis/ decisions/ 等)。OWNDAYS 出力に出る。
- - **personal/<project>** = 非OWNDAYS の各PJ/投資 (個人PJ 等)。OWNDAYS 出力には出さない。
+ - **personal/<project>** = 非OWNDAYS の各PJ/投資 (Example Garden 等)。OWNDAYS 出力には出さない。
    /personal 専用モードが「Core + その PJ」で参照する。
 
 ここは「ドメインとは何か」の **単一の真実源** (pure function)。判定は path 先頭で行い frontmatter 非依存
@@ -44,7 +44,7 @@ def _parts(rel) -> tuple:
 def is_personal_rel(rel) -> bool:
     """WIKI_DIR 相対 path が personal ドメイン (非OWNDAYS) か。先頭ディレクトリ一致。
 
-    例 'personal/example-project/plan.md' → True。空・不正は False (= OWNDAYS 既定で安全側)。
+    例 'personal/example-garden/plan.md' → True。空・不正は False (= OWNDAYS 既定で安全側)。
     """
     p = _parts(rel)
     return len(p) > 0 and p[0] == PERSONAL_DOMAIN

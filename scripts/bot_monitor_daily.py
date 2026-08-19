@@ -220,8 +220,12 @@ def main():
         alerts = evaluate_alerts(agg)
         if alerts:
             try:
-                from clone_improve_lib import line_push  # type: ignore
-                line_push(f"🤖 bot monitor daily ({args.since})\n" + "\n".join(alerts))
+                from clone_improve_lib import line_push, line_push_digest  # type: ignore
+                text = f"🤖 bot monitor daily ({args.since})\n" + "\n".join(alerts)
+                if any("context_prefix_leak" in a for a in alerts):
+                    line_push(text, critical=True)  # privacy 系 (生 context 露出) は即時 (cross-check)
+                else:
+                    line_push_digest(text, "botモニタ")
             except Exception as e:
                 print(f"alert push failed: {e}", file=sys.stderr)
     if args.json:

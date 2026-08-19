@@ -85,6 +85,51 @@ HEYGEN_LOW_QUOTA = float(os.getenv("HEYGEN_LOW_QUOTA", "60"))  # 残 quota 閾�
 VAPI_CALLS_WINDOW_H = int(os.getenv("VAPI_CALLS_WINDOW_H", "48"))
 
 
+RECALL_API_BASE = os.getenv("RECALL_API_BASE", "https://ap-northeast-1.recall.ai/api/v1")
+RECALL_API_KEY = os.getenv("RECALL_API_KEY", "")
+
+
+def check_recall() -> dict:
+    """Recall.ai の bot 作成可否を **実際に作れるか** で見る (★2026-08-06)。
+
+    事故: 2026-08-04 22:00 から POST /bot/ が 402 Payment Required を返し続け、
+    web 会議の自動議事録が **5 日間・6 会議分** 止まっていた。本 watchdog の監視対象は
+    vapi/litellm/elevenlabs/heygen だけで **Recall が入っておらず**、
+    meeting_autojoin 側の loud_fail が 111 連続失敗まで積み上がって初めて表に出た。
+
+    残高 API は公開されていないので、「クレジット切れなら 402 を返す」性質を使う。
+    GET /bot/ は残高ゼロでも 200 を返すため死活監視にならない — 判定は POST の
+    ステータスで行い、**実際には作らない** (join_at を過去にして即失敗させる等はせず、
+    直近 cycle の meeting_autojoin ログに残る 402 を読む方式にする = 課金も副作用も無い)。
+    """
+    # ★2026-08-09 海山判断: Recall をやめ Plaud Desktop に一本化 → 使っていないものを
+    # 監視して鳴り続けないよう、自動参加が無効なら skip する (再有効化すれば自動で復帰)。
+    if os.getenv("MEETING_AUTOJOIN_ENABLED", "0") != "1":
+        return {"service": "recall", "ok": True,
+                "skipped": "MEETING_AUTOJOIN_ENABLED != 1 (Recall 不使用)"}
+    if not RECALL_API_KEY:
+        return {"service": "recall", "ok": True, "skipped": "RECALL_API_KEY 未設定"}
+    log = Path(os.getenv("BRAIN_APP_ROOT", "/app")) / "data" / "brain" / "meeting_autojoin.log"
+    if not log.exists():
+        return {"service": "recall", "ok": True, "degraded": "meeting_autojoin.log 不在"}
+    try:
+        tail = log.read_text(encoding="utf-8", errors="ignore")[-200_000:]
+    except Exception as e:
+        return {"service": "recall", "ok": True, "degraded": f"{type(e).__name__}: {e}"}
+    n402 = tail.count("402 Payment Required")
+    # 直近の 402 がいつか (ログ行頭の timestamp)
+    last = ""
+    for line in reversed(tail.splitlines()):
+        if "402 Payment Required" in line:
+            last = line[:19]
+            break
+    return {
+        "service": "recall", "ok": n402 == 0, "n_402": n402, "last_402": last,
+        "note": ("bot 予約が 402 (クレジット切れ) で失敗している = 会議の自動議事録が止まる"
+                 if n402 else ""),
+    }
+
+
 def check_vapi() -> dict:
     """Vapi の直近通話数を GET /call で取得し、0 件なら credit-out / assistant 起動失敗 の疑いとして警報。"""
     if not VAPI_API_KEY:
@@ -255,7 +300,7 @@ def check_heygen() -> dict:
 
 
 # 監視対象 (= check 関数のリスト。設定済なら ping、未設定なら skipped)
-CHECKS = [check_vapi, check_litellm, check_elevenlabs, check_heygen]
+CHECKS = [check_vapi, check_litellm, check_elevenlabs, check_heygen, check_recall]
 
 
 def _alert_line(r: dict) -> list:
@@ -274,6 +319,11 @@ def _alert_line(r: dict) -> list:
         return [f"  • ElevenLabs: 残 {r.get('remaining_chars', 0):,} 文字 "
                 f"(使用 {r.get('used', 0):,}/{r.get('limit', 0):,}、閾値 {r.get('threshold_chars'):,})",
                 "    → 音声生成が枯渇間近。ElevenLabs dashboard で追加: https://elevenlabs.io/app"]
+    if s == "recall":
+        return [f"  • Recall.ai: bot 予約が 402 (クレジット切れ) — 直近ログに {r.get('n_402', 0)} 回"
+                f" (最新 {r.get('last_402') or '?'})",
+                "    → **web 会議の自動議事録が止まっています**。Recall dashboard で"
+                " クレジット追加: https://www.recall.ai/dashboard"]
     if s == "heygen":
         return [f"  • HeyGen: 残 quota {r.get('remaining_quota', '?')} (閾値 {r.get('threshold')}、"
                 f"{r.get('note', '')})",

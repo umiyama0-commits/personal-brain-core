@@ -48,6 +48,9 @@ _COST_ALIASES = {
     "smart-gpt": "gpt-5.4",
     "smart-gpt-pro": "gpt-5.4-pro",
     "fast-gpt": "gpt-5.4-mini",
+    # ★2026-07-31 GPT-5.6 世代 (A/B 中) の alias 解決
+    "smart-luna": "gpt-5.6-luna",
+    "smart-terra": "gpt-5.6-terra",
     "code": "gpt-5.4-pro",
     "code-max": "gpt-5-pro",
 }
@@ -225,10 +228,22 @@ def _format_cost_summary(events: list[dict]) -> str:
         "claude-opus-4-20250514": {"input": 15.00, "output": 75.00, "cache_read": 1.50, "cache_write": 18.75},
         "claude-haiku-4-5": {"input": 1.00, "output": 5.00, "cache_read": 0.10, "cache_write": 1.25},
         # OpenAI
-        "gpt-4o": {"input": 2.50, "output": 10.00, "cache_read": 1.25},
-        "gpt-5.4": {"input": 10.00, "output": 40.00, "cache_read": 2.50},
-        "gpt-5.4-pro": {"input": 30.00, "output": 120.00},
-        "gpt-5.4-mini": {"input": 0.50, "output": 2.00, "cache_read": 0.125},
+        "gpt-4o": {"input": 2.50, "output": 10.00, "cache_read": 1.25, "cache_write": 0.0},
+        # ★2026-07-27 公式 pricing と突合して是正 (developers.openai.com/api/docs/pricing)。
+        #   旧値は input 10.00 / output 40.00 / cache_read 2.50 で、**input 4倍・output 2.7倍・
+        #   cache_read 10倍**の過大計上だった。実測 (キャッシュヒット 80.2%) で再計算すると
+        #   単日 $54.21 と表示されていた実額は **$2.40** 相当 = ダッシュボードが約 22 倍に
+        #   膨らませていた (= コスト判断・予算 alert の土台が誤っていた)。
+        # ★cache_write=0: OpenAI はキャッシュ**書込を課金しない** (Anthropic のみ 1.25x/2.0x)。
+        #   明示しないと下の fallback `price["input"] * 1.25` が効き、書込分を丸ごと過大計上する。
+        "gpt-5.4": {"input": 2.50, "output": 15.00, "cache_read": 0.25, "cache_write": 0.0},
+        "gpt-5.4-pro": {"input": 30.00, "output": 120.00, "cache_write": 0.0},
+        "gpt-5.4-mini": {"input": 0.75, "output": 4.50, "cache_read": 0.075, "cache_write": 0.0},
+        # ★2026-07-31 GPT-5.6 世代 (A/B 中)。未登録だと未知モデル fallback ($5/$15) が当たり
+        #   luna を実単価の 25 倍で計上 → A/B が「luna の方が高い」と逆の結論を出す。
+        "gpt-5.6-luna": {"input": 0.20, "output": 1.20, "cache_read": 0.02, "cache_write": 0.0},
+        "gpt-5.6-terra": {"input": 2.00, "output": 12.00, "cache_read": 0.20, "cache_write": 0.0},
+        "gpt-5.6-sol": {"input": 5.00, "output": 30.00, "cache_read": 0.50, "cache_write": 0.0},
         "gpt-5-pro": {"input": 60.00, "output": 240.00},
         "gpt-5-codex": {"input": 10.00, "output": 40.00},
     }

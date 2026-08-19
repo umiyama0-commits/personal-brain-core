@@ -19,29 +19,29 @@ _RAW = """# LINE chat: lineworks_うみやまAI_2026-07-13
 
 ## 2026-07-13
 
-[14:53] 海山丈司: 先週の関東エリアの売り上げについて教えて。目標は 100,000,000円 だったはず
-[14:53] うみやまAI: 先週の関東A+B 合計は客数 8,000、売上 76,000,000円、客単価 9,500円。
-関東Aエリアは客数 5,500。
+[14:53] 海山丈司: 先週の関東エリアの売り上げについて教えて。目標は 200,000,000円 だったはず
+[14:53] うみやまAI: 先週の関東A+B 合計は客数 9,780、売上 111,222,333円、客単価 14,166円。
+関東Aエリアは客数 6,127。
 [14:58] 海山丈司: ありがとう
 """
 
 
 def test_bot_only_numbers_are_redacted():
-    compiled = ("- 2026-07-07〜2026-07-12 の関東A+B 合計売上は、客数 8,000、"
-                "売上 76,000,000円、客単価 9,500円だった。\n"
-                "- 目標は 100,000,000円 と共有された。")
+    compiled = ("- 2026-07-07〜2026-07-12 の関東A+B 合計売上は、客数 9,780、"
+                "売上 111,222,333円、客単価 14,166円だった。\n"
+                "- 目標は 200,000,000円 と共有された。")
     out, n = scrub_bot_numbers(compiled, _RAW)
     assert n == 3
-    assert "8,000" not in out and "76,000,000" not in out and "9,500" not in out
+    assert "9,780" not in out and "111,222,333" not in out and "14,166" not in out
     assert "〔数値略〕" in out
-    assert "100,000,000円" in out          # 海山発話由来は保持
+    assert "200,000,000円" in out          # 海山発話由来は保持
     assert "捏造リスク" in out              # 注記 footer
     # 行は消えていない (定性的文脈の保持)
     assert "関東A+B 合計売上" in out
 
 
 def test_human_numbers_kept_and_dates_untouched():
-    compiled = "### 2026-07-13\n- 目標 100,000,000円 の進捗が確認された。"
+    compiled = "### 2026-07-13\n- 目標 200,000,000円 の進捗が確認された。"
     out, n = scrub_bot_numbers(compiled, _RAW)
     assert n == 0 and out == compiled  # 日付 (4桁区切り無し) は token 対象外
 
@@ -57,9 +57,9 @@ def test_split_speaker_continuation_lines():
     parts = split_speaker_text(_RAW, ("うみやまAI",))
     assert parts is not None
     human, bot = parts
-    assert "100,000,000" in human and "100,000,000" not in bot
-    assert "5,500" in bot          # bot 発話の継続行 (改行跨ぎ) も bot 側に帰属
-    assert "5,500" not in human
+    assert "200,000,000" in human and "200,000,000" not in bot
+    assert "6,127" in bot          # bot 発話の継続行 (改行跨ぎ) も bot 側に帰属
+    assert "6,127" not in human
 
 
 def test_ingest_conversation_markdown_format():
@@ -69,19 +69,19 @@ def test_ingest_conversation_markdown_format():
     raw_md = (
         "## 14:53\n"
         "**User**: 先週の関東エリアの売り上げについて教えて\n"
-        "**AI**: 先週の関東A+B 合計は客数 8,000、売上 76,000,000円。\n"
-        "内訳は関東A 5,500。\n"
+        "**AI**: 先週の関東A+B 合計は客数 9,780、売上 111,222,333円。\n"
+        "内訳は関東A 6,127。\n"
         "## 14:58\n"
-        "**User**: 目標は 100,000,000円 だったよね\n"
+        "**User**: 目標は 200,000,000円 だったよね\n"
     )
-    compiled = "- 関東A+B 合計は客数 8,000、売上 76,000,000円 (目標 100,000,000円)。"
+    compiled = "- 関東A+B 合計は客数 9,780、売上 111,222,333円 (目標 200,000,000円)。"
     out, n = scrub_bot_numbers(compiled, raw_md)
     assert n == 2
-    assert "8,000" not in out and "76,000,000" not in out
-    assert "100,000,000円" in out  # human 発話由来は保持
+    assert "9,780" not in out and "111,222,333" not in out
+    assert "200,000,000円" in out  # human 発話由来は保持
     # 継続行 (**AI** の次行) も bot 帰属
-    out2, n2 = scrub_bot_numbers("- 関東Aは 5,500 だった。", raw_md)
-    assert n2 == 1 and "5,500" not in out2
+    out2, n2 = scrub_bot_numbers("- 関東Aは 6,127 だった。", raw_md)
+    assert n2 == 1 and "6,127" not in out2
 
 
 def test_brain_wiki_compile_wiring():

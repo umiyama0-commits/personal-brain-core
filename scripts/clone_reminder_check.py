@@ -39,12 +39,14 @@ REMINDERS_DIR = APP_ROOT / "data" / "brain" / "reminders"
 SENT_DIR = REMINDERS_DIR / "_sent"
 
 
-def find_reminder(date_str: str) -> Path | None:
-    """data/brain/reminders/<date_str>.md があれば返す。"""
-    path = REMINDERS_DIR / f"{date_str}.md"
-    if path.exists() and path.is_file():
-        return path
-    return None
+def find_reminder(date_str: str) -> list[Path]:
+    """当日の reminder file 群。手動 (<date>.md) + bot 自動生成 (auto/<date>.md、
+    ★2026-07-20 owner_memory.create_reminder = git 非追跡 subdir に分離)。"""
+    out = []
+    for path in (REMINDERS_DIR / f"{date_str}.md", REMINDERS_DIR / "auto" / f"{date_str}.md"):
+        if path.exists() and path.is_file():
+            out.append(path)
+    return out
 
 
 def push_reminder(reminder_path: Path, dry_run: bool = False) -> bool:
@@ -72,7 +74,7 @@ def push_reminder(reminder_path: Path, dry_run: bool = False) -> bool:
         logger.info(f"[dry-run] would push ({len(push_text)} chars):\n{push_text[:300]}...")
         return True
 
-    ok = line_push(push_text)
+    ok = line_push(push_text, critical=True)  # ★2026-08-03: ADR 2026-07-20 が即時と定めた系統 (日次上限に当たっても遅延させない)
     if ok:
         # _sent/ に move (重複送信防止)
         SENT_DIR.mkdir(parents=True, exist_ok=True)
@@ -95,14 +97,16 @@ def main() -> int:
     args = parser.parse_args()
 
     today = args.date or datetime.now(JST).strftime("%Y-%m-%d")
-    reminder = find_reminder(today)
-    if not reminder:
-        logger.info(f"no reminder for {today} (looked at {REMINDERS_DIR}/{today}.md)")
+    reminders = find_reminder(today)
+    if not reminders:
+        logger.info(f"no reminder for {today} (looked at {REMINDERS_DIR}/[auto/]{today}.md)")
         return 0
 
-    logger.info(f"found reminder: {reminder}")
-    ok = push_reminder(reminder, dry_run=args.dry_run)
-    return 0 if ok else 1
+    # 全件 push (list 化で all() の短絡による取り残しを防ぐ)
+    results = [push_reminder(p, dry_run=args.dry_run) for p in reminders]
+    for p in reminders:
+        logger.info(f"found reminder: {p}")
+    return 0 if all(results) else 1
 
 
 if __name__ == "__main__":

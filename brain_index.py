@@ -28,6 +28,8 @@ import chromadb
 from chromadb.config import Settings
 import httpx
 
+from brain_wiki_helpers.chunk_sync import plan_chunk_sync
+
 logger = logging.getLogger(__name__)
 
 CHROMA_DIR = os.getenv("CHROMA_DIR", "/app/chroma_data")
@@ -124,18 +126,21 @@ class BrainIndex:
         if tags:
             metadata["tags"] = ",".join(tags)
 
-        # 古いチャンクを削除（ファイル単位で差し替え）
-        # ★2026-06-10: 同期 chromadb 呼び出しを to_thread 化。async ハンドラ内で直接実行すると
-        #   reindex(起動時 871 file)中に event loop が固まり全 webhook が stall する。chromadb は
-        #   coarse-locking で multithread-safe (CLAUDE.md 1.5 の SIGSEGV は別プロセスの話)。
-        try:
-            await asyncio.to_thread(self.wiki_col.delete, where={"file": rel_path})
-        except Exception:
-            pass
+        # ★2026-08-15 (ADR 案 A-2): **ここで file 単位の全削除をしない**。
+        #   chroma の既存 id への upsert はラベルを再利用して in-place 更新する
+        #   (実測: 200 chunk を 12 サイクル upsert してもサイズ不変) が、delete は
+        #   ラベルを手放し、削除スロットは再利用されない (同条件で 200 → 2,600 slot)。
+        #   消してから入れ直していたこと自体が ~285MB/日 の肥大の原因だった。
+        #   代わりに、下で「今回の id に含まれない余剰 id」だけを消す。
+        #   ★2026-06-10: 同期 chromadb 呼び出しは to_thread 化 (async ハンドラ内で直接
+        #   実行すると reindex 中に event loop が固まり全 webhook が stall する)。
+        existing_ids, existing_ok = await self._existing_wiki_ids(rel_path)
 
         # チャンク分割 → 登録
         chunks = self._split_chunks(content)
         if not chunks:
+            # 本文が空になった file。旧 chunk を残すと「消したはずの内容」が hit し続ける。
+            await self._drop_wiki_file(rel_path, existing_ids, existing_ok)
             return
 
         # ★2026-05-23 Plan C v2 Step 1 (海山 OK): Contextual Retrieval
@@ -184,6 +189,14 @@ class BrainIndex:
         embeddings = await self._get_embeddings(chunks)
 
         if embeddings:
+            plan = plan_chunk_sync(existing_ids, ids)
+            if not existing_ok:
+                # 既存 id を取れなかった = 余剰を特定できない。従来どおり全削除してから
+                # 入れ直す (この file だけ肥大するが、消したはずの chunk を残さない方を採る)。
+                try:
+                    await asyncio.to_thread(self.wiki_col.delete, where={"file": rel_path})
+                except Exception:
+                    pass
             await asyncio.to_thread(
                 self.wiki_col.upsert,
                 ids=ids,
@@ -191,7 +204,13 @@ class BrainIndex:
                 embeddings=embeddings,
                 metadatas=metadatas,
             )
-            logger.info(f"Indexed wiki: {rel_path} → {len(chunks)} chunks")
+            # 余剰は upsert の **後** に消す (先に消して upsert が落ちると chunk を失う)
+            if existing_ok and plan.delete_ids:
+                try:
+                    await asyncio.to_thread(self.wiki_col.delete, ids=plan.delete_ids)
+                except Exception as e:
+                    logger.warning(f"余剰 chunk の削除に失敗 {rel_path}: {e}")
+            logger.info(f"Indexed wiki: {rel_path} → {len(chunks)} chunks ({plan.summary()})")
         else:
             # Embedding失敗時は upsert をスキップ（dim mismatch 回避）。
             # 既存の collection は 1536次元（OpenAI）で作られているため、
@@ -378,22 +397,210 @@ class BrainIndex:
     # 全Wiki再インデックス
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    async def reindex_all_wiki(self, wiki_dir: Path):
-        """Wiki全体を再インデックス"""
-        count = 0
-        for md_file in wiki_dir.rglob("*.md"):
-            await self.index_wiki_file(md_file)
-            count += 1
-        logger.info(f"Reindexed {count} wiki files")
 
-    async def reindex_all_raw(self, raw_dir: Path):
-        """Raw全体を再インデックス"""
+
+    async def reconcile_missing_wiki(self, wiki_dir: Path) -> int:
+        """ディスク上の非personal wiki と索引を突合し、欠落分だけ補充する。
+
+        ★2026-08-10 (再ローンチ総点検 critical): 「chunks>0 なら全 skip」は 7/26 の
+        chroma 再構築後、mtime が古いファイルを永久に取り残していた。実測: 非personal
+        wiki 2,902 件中 1,442 件しか索引に無く (50% 欠落)、規程 54 件は 0 チャンク =
+        「公休/産休/副業」の制度質問に売上表が返る状態。wipe しない (§1.3/§1.5 非抵触 —
+        書き込みは本プロセス自身の index = 並行アクセスではない)。戻り値 = 補充件数。
+        """
+        from brain_wiki_helpers.domain import is_personal_rel
+        indexed = await asyncio.to_thread(self.list_indexed_wiki_files)
+        disk: dict = {}
+        for p in wiki_dir.rglob("*.md"):
+            rel = str(p.relative_to(wiki_dir))
+            if not is_personal_rel(rel):
+                disk[rel] = p
+        missing = sorted(set(disk) - indexed)
+        if not missing:
+            logger.info(f"Vector index reconciled: {len(indexed)} files, no gap")
+            return 0
+        logger.warning(
+            f"★索引欠落 {len(missing)} 件を補充 (indexed={len(indexed)} disk={len(disk)})")
+        done = 0
+        for rel in missing:
+            try:
+                await self.index_wiki_file(disk[rel])
+                done += 1
+                if done % 100 == 0:
+                    logger.info(f"  reconcile: {done}/{len(missing)}")
+                await asyncio.sleep(0.05)  # litellm を圧迫しない
+            except Exception as e:
+                logger.warning(f"  reconcile fail {rel}: {e}")
+        logger.info(f"★索引補充 完了: {done}/{len(missing)} 件")
+        # §1.18: 大規模欠落は「静かに直った」で終わらせない (索引経路の穴の兆候)
+        try:
+            import sys as _sys
+            _sys.path.insert(0, "/app/scripts")
+            from clone_improve_lib import loud_fail
+            loud_fail("wiki_index_gap", len(missing) <= 20,
+                      f"起動時に索引欠落 {len(missing)} 件を検知し補充 (20 件超は要調査)",
+                      threshold=1, cooldown_h=72)
+        except Exception:
+            pass
+        return done
+
+    def list_indexed_wiki_files(self) -> set:
+        """wiki collection に索引済みの相対 path 集合 (metadata 'file')。
+
+        ★2026-08-10 (再ローンチ総点検): 起動時 reconcile 用。実測で非personal wiki
+        2,902 件中 1,442 件しか索引に無く (50% 欠落)、規程 54 件は 0 チャンク =
+        規程FAQ が死んでいた。原因は 7/26 の chroma 再構築後、mtime が古いファイルを
+        索引に乗せる経路がコード上存在しなかったこと。
+        """
+        out = set()
+        try:
+            offset = 0
+            while True:
+                batch = self.wiki_col.get(include=["metadatas"], limit=5000, offset=offset)
+                metas = batch.get("metadatas") or []
+                if not metas:
+                    break
+                for m in metas:
+                    f = (m or {}).get("file")
+                    if f:
+                        out.add(f)
+                if len(metas) < 5000:
+                    break
+                offset += 5000
+        except Exception as e:
+            logger.warning(f"list_indexed_wiki_files failed: {e}")
+        return out
+
+    async def _existing_wiki_ids(self, rel_path: str) -> tuple[list[str], bool]:
+        """この file が今 索引に持っている chunk id を **漏れなく** 返す。
+
+        戻り値の bool は「全件取れたと言えるか」。False の時に「余剰なし」と解釈すると、
+        縮んだ file の古い chunk が索引に残り、消したはずの内容が検索に出る。
+        呼び出し側は False なら従来の全削除にフォールバックすること。
+
+        `include=[]` は ids だけを返す (documents/embeddings を読まない = HNSW も触らない)。
+        `list_indexed_wiki_files` と同じく明示 paging する — 暗黙 limit で静かに打ち切られると、
+        それがそのまま「余剰を消し損ねる」に化けるため。
+        """
+        out: list[str] = []
+        offset = 0
+        page = 5000
+        try:
+            while True:
+                got = await asyncio.to_thread(
+                    self.wiki_col.get, where={"file": rel_path},
+                    include=[], limit=page, offset=offset,
+                )
+                batch = (got or {}).get("ids") or []
+                out.extend(batch)
+                if len(batch) < page:
+                    return out, True
+                offset += page
+        except Exception as e:
+            logger.warning(f"既存 chunk id の取得に失敗 {rel_path}: {e} → 全置換に fallback")
+            return [], False
+
+    async def _drop_wiki_file(self, rel_path: str, existing_ids: list[str], ok: bool) -> None:
+        """本文が空になった file を索引から落とす。"""
+        try:
+            if ok and existing_ids:
+                await asyncio.to_thread(self.wiki_col.delete, ids=existing_ids)
+                logger.info(f"Emptied wiki: {rel_path} → {len(existing_ids)} chunks 削除")
+            elif not ok:
+                await asyncio.to_thread(self.wiki_col.delete, where={"file": rel_path})
+        except Exception as e:
+            logger.warning(f"空 file の chunk 削除に失敗 {rel_path}: {e}")
+
+    async def rebuild_all(self, wiki_dir: Path, raw_dir: Path) -> dict:
+        """索引をゼロから作り直し、**その場で全数突合まで通す** (★2026-08-14)。
+
+        8/13 の学び「『索引がある』と『全部索引にある』は別。件数の一致こそが検証」は
+        起動時 warm path (chunks>0 → reconcile_missing_wiki) にしか配線されておらず、
+        **再構築本体だけが無検証**だった。chroma 計画 rebuild (docs/runbook.md) を
+        定例運用にすると、そこが毎回の穴になる。reconcile は欠落を補充し、20 件超なら
+        loud_fail (§1.18) で鳴る = 「build は成功し、半分だけ動く」で終われなくする。
+        """
+        w = await self.reindex_all_wiki(wiki_dir)
+        r = await self.reindex_all_raw(raw_dir)
+        reconciled = await self.reconcile_missing_wiki(wiki_dir)
+        # raw 側には突合 (reconcile) が無く、落ちた分を拾う経路が次回のフル再構築しかない。
+        # wiki は reconcile → wiki_index_gap で鳴るのに raw だけ log 1 行では非対称なので、
+        # ここで鳴らす (§1.18)。無人 rebuild で raw が silent に欠けるのを防ぐ。
+        if r["failed"]:
+            try:
+                import sys as _sys
+                _sys.path.insert(0, "/app/scripts")
+                from clone_improve_lib import loud_fail
+                loud_fail("raw_index_fail", False,
+                          f"フル再構築で raw {len(r['failed'])} 件の索引に失敗 "
+                          f"(raw には突合が無く、次のフル再構築まで欠落が残る): "
+                          f"{r['failed'][:3]}",
+                          threshold=1, cooldown_h=72)
+            except Exception:
+                pass
+        stats = self.get_stats()
+        return {
+            "total_chunks": stats["total_chunks"],
+            "wiki_indexed": w["indexed"], "wiki_skipped": w["skipped"],
+            "wiki_failed": len(w["failed"]),
+            "raw_indexed": r["indexed"], "raw_failed": len(r["failed"]),
+            "reconciled": reconciled,
+        }
+
+    async def reindex_all_wiki(self, wiki_dir: Path) -> dict:
+        """Wiki全体を再インデックス。
+
+        ★2026-08-14: per-file の try/except を追加。旧実装は 1 ファイルの例外で loop 全体が
+        abort し、呼び元 (_initial_reindex) は warning 1 行を吐いて終わっていた = **部分索引の
+        まま chunks>0 が確定**し、以後の起動は warm path に入る。7/26 (単一ファイル 800 chunks で
+        プロセス死) と 8/13 (再構築後 50% 欠落を誰も検知できず 17 日) が重なる条件そのもの。
+        1 件の失敗で全体を捨てず、失敗を数えて可視化する (残りは reconcile が拾う)。
+
+        ★personal は index_wiki_file が早期 return する (索引に載せず残骸だけ掃除) ので、
+        件数は **非personal だけ** を数える。ここを混ぜると runbook の突合
+        (`find wiki -name '*.md' | grep -v /personal/ | wc -l` との比較) が必ずズレて、
+        照合そのものが形骸化する。呼び出しは personal にも通す = 残骸掃除を落とさないため。
+        """
+        from brain_wiki_helpers.domain import is_personal_rel
         count = 0
+        skipped = 0
+        failed: list[str] = []
+        for md_file in wiki_dir.rglob("*.md"):
+            try:
+                rel = str(md_file.relative_to(wiki_dir))
+            except ValueError:
+                rel = md_file.name
+            try:
+                await self.index_wiki_file(md_file)
+                if is_personal_rel(rel):
+                    skipped += 1
+                else:
+                    count += 1
+            except Exception as e:
+                failed.append(f"{md_file.name}: {type(e).__name__}")
+                logger.warning(f"reindex_all_wiki fail {md_file.name}: {e}")
+        logger.info(
+            f"Reindexed {count} wiki files (personal skipped={skipped} failed={len(failed)})")
+        return {"indexed": count, "skipped": skipped, "failed": failed}
+
+    async def reindex_all_raw(self, raw_dir: Path) -> dict:
+        """Raw全体を再インデックス (wiki 側と同じ理由で per-file 隔離)。
+
+        raw collection には reconcile (突合補充) が無いため、ここで落ちた分を拾う経路は
+        次回のフル再構築しかない。だからこそ件数を返して呼び元に判断させる。
+        """
+        count = 0
+        failed: list[str] = []
         for md_file in raw_dir.rglob("*.md"):
-            content = md_file.read_text(encoding="utf-8")
-            await self.index_raw(content, source=str(md_file.name))
-            count += 1
-        logger.info(f"Reindexed {count} raw files")
+            try:
+                content = md_file.read_text(encoding="utf-8")
+                await self.index_raw(content, source=str(md_file.name))
+                count += 1
+            except Exception as e:
+                failed.append(f"{md_file.name}: {type(e).__name__}")
+                logger.warning(f"reindex_all_raw fail {md_file.name}: {e}")
+        logger.info(f"Reindexed {count} raw files (failed={len(failed)})")
+        return {"indexed": count, "failed": failed}
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # Internal

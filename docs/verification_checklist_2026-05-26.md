@@ -38,7 +38,7 @@
 ```
 [ ] 2.1 通常応答          /clone-public 今日の売上どう?     → 自然応答 + 数字
 [ ] 2.2 PDF 添付応答       適当 PDF 投下 + 質問              → 中身踏まえて応答
-[ ] 2.3 clone_memory 注入   過去 続き「あの○○の件」         → natural resolve
+[ ] 2.3 clone_memory 注入   過去 続き「あの龍仁の件」         → natural resolve
 [ ] 2.4 /brain stats        /brain                            → 蓄積件数表示
 [ ] 2.5 /audit-stats        /audit-stats                      → 過去 30 日統計
 [ ] 2.6 Drive URL fetch     Drive URL 投下                    → fetch or 「権限付与して」
@@ -88,7 +88,7 @@
 ## Feature 4: Tier 1 memory
 ```
 [ ] 4.7 個人 LINE で 1-2 turn 後 clone_memory/<user_id>.md 確認 → date metadata あり
-[ ] 4.8 「海外出店」話題 → 翌日 (= 同 session 内) 「あの件」 → ○○で resolve
+[ ] 4.8 「龍仁出店」話題 → 翌日 (= 同 session 内) 「あの件」 → 龍仁で resolve
 ```
 
 ## Feature 5: AI Research Agent

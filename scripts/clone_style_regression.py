@@ -41,7 +41,7 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from clone_improve_lib import (
-    call_llm, line_push, append_jsonl, ensure_dirs,
+    call_llm, line_push, line_push_digest, append_jsonl, ensure_dirs,
     IMPROVE_DIR, WIKI_DIR, JST, pick_cross_family_judge,
 )
 
@@ -354,7 +354,7 @@ async def main():
         )
         logger.error(msg)
         try:
-            line_push(msg)
+            line_push_digest(msg, "文体回帰")
         except Exception:
             pass
         append_jsonl(LOG_PATH, {"date": today, "status": "judge_unavailable",
@@ -491,7 +491,7 @@ async def main():
         msg = f"📉 うみやまAI style regression ({today})\n" + "\n".join(alerts)
         msg += f"\n\nsummary: PASS {n_ok} / WARN {n_warn} / FAIL {n_fail}"
         msg += f"\n詳細: {out_path}"
-        line_push(msg)
+        line_push_digest(msg, "文体回帰")
         append_jsonl(LOG_PATH, {**summary, "alerts": alerts})
         return 1
     else:

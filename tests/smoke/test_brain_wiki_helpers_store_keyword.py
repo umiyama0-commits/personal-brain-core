@@ -17,7 +17,7 @@ from brain_wiki_helpers.store_keyword import (
 HISTORY_STORES_SAMPLE = """\
 ## 2026-04
 | # | code | name | qty | sales | currency |
-| 1 | 9001 | サンプル駅前店 | 1 | 12,345 | JPY |
+| 1 | 1001 | 武蔵小山パルム | 1 | 19,727 | JPY |
 | 2 | 1002 | 川崎ダイス | 8 | 102,454 | JPY |
 | 3 | 1003 | アミュプラザくまもと | 12 | 214,672 | JPY |
 | 4 | 1004 | ららぽーと湘南平塚 | 5 | 78,500 | JPY |
@@ -30,7 +30,7 @@ HISTORY_STORES_SAMPLE = """\
 # daily-stores.md (今日) 形式
 DAILY_STORES_SAMPLE = """\
 | # | code | name | customer | (JPY) sales |
-| 1 | 9001 | サンプル駅前店 | 1 | (JPY)12,345 |
+| 1 | 1001 | 武蔵小山パルム | 1 | (JPY)19,727 |
 | 2 | 1002 | 川崎ダイス | 8 | (JPY)102,454 |
 | 9 | 1009 | イオンモール伊達 | 2 | (JPY)35,000 |
 | 10 | 1010 | アスティ静岡 | 3 | (JPY)42,000 |
@@ -58,11 +58,11 @@ def test_exact_match_kawasaki_dice():
 # ─── prefix match (tokenize 経由) ─────────────
 @pytest.mark.smoke
 def test_prefix_match_unique_token():
-    """「サンプル駅前の最近の売上」 → tokens=[サンプル駅前, 最近, 売上]、unique なので サンプル駅前店 採用"""
+    """「武蔵小山の最近の売上」 → tokens=[武蔵小山, 最近, 売上]、unique なので 武蔵小山パルム 採用"""
     result = detect_store_keyword(
-        "サンプル駅前の最近の売上は?", HISTORY_STORES_SAMPLE
+        "武蔵小山の最近の売上は?", HISTORY_STORES_SAMPLE
     )
-    assert result == "サンプル駅前店"
+    assert result == "武蔵小山パルム"
 
 
 @pytest.mark.smoke

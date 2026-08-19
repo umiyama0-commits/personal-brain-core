@@ -309,10 +309,20 @@ COST_PRICE_TABLE: dict[str, dict[str, float]] = {
     "claude-opus-4-20250514": {"input": 15.0, "output": 75.0, "cache_read": 1.5,  "cache_write": 18.75},
     "claude-haiku-4-5":       {"input": 1.0,  "output": 5.0,  "cache_read": 0.1,  "cache_write": 1.25},
     # OpenAI
-    "gpt-4o":                 {"input": 2.5,  "output": 10.0,  "cache_read": 1.25},
-    "gpt-5.4":                {"input": 10.0, "output": 40.0,  "cache_read": 2.5},
-    "gpt-5.4-pro":            {"input": 30.0, "output": 120.0},
-    "gpt-5.4-mini":           {"input": 0.5,  "output": 2.0,   "cache_read": 0.125},
+    # ★2026-07-31 公式 pricing と突合して是正 (developers.openai.com/api/docs/pricing)。
+    #   gpt-5.4 の旧値 $10/$40/$2.5 は **input 4倍・output 2.7倍・cache_read 10倍**の過大計上で、
+    #   コスト表示が実額の約4.5倍に膨らんでいた (bot_metrics 側は 677598c で是正済、こちらが積み残し)。
+    #   cache_write=0: OpenAI はキャッシュ**書込を課金しない** (Anthropic のみ)。明示しないと
+    #   下流の fallback が Anthropic 式 1.25x を当ててしまう。
+    "gpt-4o":                 {"input": 2.5,  "output": 10.0,  "cache_read": 1.25, "cache_write": 0.0},
+    "gpt-5.4":                {"input": 2.5,  "output": 15.0,  "cache_read": 0.25, "cache_write": 0.0},
+    "gpt-5.4-pro":            {"input": 30.0, "output": 120.0, "cache_write": 0.0},
+    "gpt-5.4-mini":           {"input": 0.75, "output": 4.5,   "cache_read": 0.075, "cache_write": 0.0},
+    # ★2026-07-31 GPT-5.6 世代 (OpenAI 大幅値下げ)。A/B 中の luna を **未知モデル扱いの
+    #   fallback ($5/$15) で 25 倍に過大計上しない**ために必須 (無いと A/B が逆の結論を出す)。
+    "gpt-5.6-luna":           {"input": 0.20, "output": 1.20,  "cache_read": 0.02, "cache_write": 0.0},
+    "gpt-5.6-terra":          {"input": 2.0,  "output": 12.0,  "cache_read": 0.20, "cache_write": 0.0},
+    "gpt-5.6-sol":            {"input": 5.0,  "output": 30.0,  "cache_read": 0.50, "cache_write": 0.0},
     "gpt-5-pro":              {"input": 60.0, "output": 240.0},
     "gpt-5-codex":            {"input": 10.0, "output": 40.0},
     "text-embedding-3-small": {"input": 0.02, "output": 0.0},
@@ -333,6 +343,10 @@ COST_MODEL_ALIASES: dict[str, str] = {
     "smart-gpt": "gpt-5.4",
     "smart-gpt-pro": "gpt-5.4-pro",
     "fast-gpt": "gpt-5.4-mini",
+    # ★2026-07-31 GPT-5.6 世代 (A/B 中)。alias 解決が無いと未知モデル扱いになり
+    #   fallback $5/$15 = luna 実単価の 25 倍で計上され、A/B が逆の結論を出す。
+    "smart-luna": "gpt-5.6-luna",
+    "smart-terra": "gpt-5.6-terra",
     "code": "gpt-5.4-pro",
     "code-max": "gpt-5-pro",
     "whisper": "whisper-1",
@@ -489,7 +503,12 @@ def aggregate_cost(since_sec: int = 86400 * 14) -> dict:
         }
 
     # 日別 USD + provider split
-    daily_usd: dict[str, float] = {}
+    # ★2026-07-31: 丸めは**表示用だけ**に留め、集計は未丸めで持つ。旧実装は日次を round(,2) した
+    #   合計を window_total にする一方、provider 別は未丸めで積んでいたため、両者の比 (pct) が
+    #   100% に揃わなかった (実測 99.4%)。GPT-5.6 luna のように桁が 1/12 になるモデルが混ざると
+    #   2 桁丸めの相対誤差が拡大し、A/B のコスト比較を歪めるため恒久修正する。
+    daily_usd: dict[str, float] = {}          # 表示用 (丸め)
+    daily_usd_raw: dict[str, float] = {}      # 集計用 (未丸め)
     daily_by_provider: dict[str, dict[str, float]] = {}
     for date, models in by_date_model.items():
         tot = 0.0
@@ -498,6 +517,7 @@ def aggregate_cost(since_sec: int = 86400 * 14) -> dict:
             u = _cost_usd(tk, model)
             tot += u
             prov_usd[_cost_provider(model)] += u
+        daily_usd_raw[date] = tot
         daily_usd[date] = round(tot, 2)
         daily_by_provider[date] = {k: round(v, 2) for k, v in prov_usd.items()}
     dates_sorted = sorted(daily_usd.keys())
@@ -525,13 +545,16 @@ def aggregate_cost(since_sec: int = 86400 * 14) -> dict:
     comp_rows.sort(key=lambda r: -r["usd"])
 
     # provider 別 (window 合計)
+    # ★2026-07-31: provider 集計も **未丸め**で積む (model_rows の表示用丸め値を再利用しない)。
+    #   pct の分母も未丸めの window 合計にする = 比率が 100% に揃う。
     prov_usd_total: dict[str, float] = defaultdict(float)
-    for r in model_rows:
-        prov_usd_total[r["provider"]] += r["usd"]
-    window_total = round(sum(daily_usd.values()), 2)
+    for model, tk in by_model.items():
+        prov_usd_total[_cost_provider(model)] += _cost_usd(tk, model)
+    window_total_raw = sum(daily_usd_raw.values())
+    window_total = round(window_total_raw, 2)          # 表示用
     provider_rows = [
         {"provider": p, "usd": round(u, 2),
-         "pct": round(u / window_total * 100, 1) if window_total else 0.0}
+         "pct": round(u / window_total_raw * 100, 1) if window_total_raw else 0.0}
         for p, u in sorted(prov_usd_total.items(), key=lambda kv: -kv[1])
     ]
 

@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bot_metrics import _read_events, _format_cost_summary, parse_since  # noqa: E402
-from clone_improve_lib import line_push  # noqa: E402
+from clone_improve_lib import line_push, line_push_digest  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("clone_cost_summary")
@@ -70,7 +70,8 @@ def main() -> int:
     # ★2026-07-10 (世界基準評価 #5): 閾値超過 (= お金が漏れている) は配達保証必須 → critical。
     #   非 critical だと personal LINE 日次 cap 枯渇日に spike alert が drop する (お金が漏れて
     #   いる時に限って通知が消える worst case)。月曜ダイジェストは通常通知 (非 critical)。
-    ok = line_push(push_text, critical=exceeded)
+    # ★2026-07-20 通知削減: 予算内の日次コストは digest、超過時のみ即時 critical
+    ok = line_push(push_text, critical=True) if exceeded else line_push_digest(push_text, "コスト")
     logger.info(f"LINE Push: {'sent' if ok else 'failed'} (critical={exceeded})")
     return 0 if ok else 1
 

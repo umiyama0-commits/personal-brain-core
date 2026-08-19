@@ -40,7 +40,7 @@ def test_is_substantive_filters_fallback_and_short():
     assert _is_substantive("申し訳ありません。少し時間を置いて") is False
     assert _is_substantive("[error] internal") is False
     # 普通の応答 (= 30 字以上)
-    assert _is_substantive("サンプル駅前店は客数 12 / 売上 38 万 / 単価 31700 円。") is True
+    assert _is_substantive("武蔵小山パルムは客数 12 / 売上 38 万 / 単価 31700 円。") is True
     assert _is_substantive("そうね、元気出ない時あるよね。無理に上げようとしないこと、大事だと思う。") is True
 
 

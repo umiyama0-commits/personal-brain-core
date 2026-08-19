@@ -3,6 +3,15 @@ model_list:
     litellm_params:
       model: anthropic/claude-opus-4-8
       api_key: os.environ/ANTHROPIC_API_KEY
+      # ★2026-08-03: Opus 4.8 は temperature を 400 で拒否する
+      # (`"temperature" is deprecated for this model.`)。呼び出し側が送っていたため
+      # **smart の呼び出しが全滅し無言で gpt-4o へ fallback** していた (25日で $182 = 支出の42%、
+      # 加えて judge の別系列防壁も無効化)。
+      # 注: `drop_params: true` は**効かない** (litellm は Anthropic 一般で temperature を
+      # 「対応 param」と見なすため落とさない — 実機 probe で確認)。モデル個別の非対応は
+      # additional_drop_params で明示する必要がある。呼び出し側 (brain_wiki_helpers/
+      # model_params.py) と二重防御。
+      additional_drop_params: ["temperature", "top_p", "top_k"]
   # ★2026-07-01 smart 切替候補: Sonnet 5 ($2/$10 導入価格〜8/31、標準 $3/$15)。
   # Opus 4.8 と同系トークナイザで純比較可。compare_models.py で A/B 中 (本番 routing 未接続)。
   - model_name: smart-sonnet
@@ -64,6 +73,32 @@ model_list:
     litellm_params:
       model: openai/gpt-5.4-mini
       api_key: os.environ/OPENAI_API_KEY
+
+  # ─── GPT-5.6 世代 (★2026-07-30 OpenAI 大幅値下げ) ───────────────────────
+  # luna: input $0.20 / cached $0.02 / output $1.20 = gpt-5.4 の約 1/12.5。
+  #   実測トラフィック (uncached 2.71M + cached 10.4M + out 34K /日) で $9.89 → $0.79/日。
+  #   社員向けクローンの主力候補。品質は A/B で 5.4 と比較してから全面切替する。
+  - model_name: smart-luna
+    litellm_params:
+      model: openai/gpt-5.6-luna
+      api_key: os.environ/OPENAI_API_KEY
+      # ★2026-08-03 コスト実測: litellm 内蔵 map が azure/gpt-5.6-luna ($1.00/$6.00) で解決し、
+      # SpendLogs に **正価の 5.000 倍** で記帳されていた (実測: p=99,669/c=163 → $0.100647、
+      # 正価なら $0.020129)。a91d385 は dashboard 側のみ修正で台帳は未修正 = A/B 判定逆転が継続。
+      # 単価を明示 override して遮断 (max_budget も水増し spend で 5 倍速く踏むリスクがあった)。
+      input_cost_per_token: 0.00000020      # $0.20 / 1M
+      output_cost_per_token: 0.00000120     # $1.20 / 1M
+      cache_read_input_token_cost: 0.00000002  # $0.02 / 1M
+  # terra: input $2.00 / cached $0.20 / output $12.00 = 5.4 よりやや安い中間段。
+  #   luna で品質が足りなかった時の受け皿。
+  - model_name: smart-terra
+    litellm_params:
+      model: openai/gpt-5.6-terra
+      api_key: os.environ/OPENAI_API_KEY
+      # ★2026-08-03: luna と同様 azure/* 誤解決による過大記帳を遮断 (実測 1.25 倍)
+      input_cost_per_token: 0.00000200      # $2.00 / 1M
+      output_cost_per_token: 0.00001200     # $12.00 / 1M
+      cache_read_input_token_cost: 0.00000020  # $0.20 / 1M
   # コード特化 (chat 互換 / 高 effort)
   # 注: GPT-5 Codex 系は /v1/responses 専用で chat/completions 非対応。
   # litellm 経由 (= Brain 内部) では gpt-5.4-pro を code 役割に。
@@ -77,6 +112,27 @@ model_list:
     litellm_params:
       model: openai/gpt-5-pro
       api_key: os.environ/OPENAI_API_KEY
+
+  # ─── ローカル推論 (★2026-08-03 海山指示: Qwen3.8-27B を Mac Studio 上で) ──────────
+  # Ollama (host 側 brew service) の MLX ネイティブ build。API コスト **ゼロ**・外部送信ゼロ。
+  # 実測 (M4 Max 36GB): 29-40 tok/s / 19GB GPU 常駐 / context 32K。
+  # 同居設計: OLLAMA_MAX_LOADED_MODELS=1 + KEEP_ALIVE=5m で未使用時は自動アンロードし、
+  #   本番 container にメモリを返す (36GB で 27B と本番を両立させるための必須設定)。
+  # 用途候補: privacy 分類・タグ付け・OCR 等の「量が多く外に出したくない」処理。
+  # 障害時は OpenAI 系へ自動 fallback (下の fallbacks 参照) = ローカル停止で bot は止まらない。
+  - model_name: local-qwen
+    litellm_params:
+      model: ollama_chat/qwen3.8:27b-mlx
+      api_base: http://host.docker.internal:11434
+      # ローカル推論は課金ゼロ (SpendLogs を汚さないよう明示)
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+      # 27B は初回ロードに時間が掛かるので既定 60s では切れる
+      timeout: 300
+      # ★thinking を既定 OFF。Qwen3.8 は thinking 常時 on だと **max_tokens を思考が食い切り
+      # content が空で返る** (実測)。システム用途 (分類・タグ付け・抽出) は思考不要なので既定 OFF、
+      # 熟考させたい呼び出し側は request で think: true を渡す。
+      think: false
 
   - model_name: text-embedding-3-small
     litellm_params:
@@ -112,10 +168,22 @@ litellm_settings:
     - fast: ["fast-gpt", "smart-fallback", "fast-anthropic"]
     # default (GPT-4o、privacy 分類・chat) も Anthropic 逃げ道を確保 (OpenAI 全断で quarantine 全倒れ回避)
     - default: ["fast-gpt", "fast-anthropic"]
-    # smart-gpt (GPT-5.4) → GPT-4o (= OpenAI quota 全断時の保険)
-    - smart-gpt: ["smart-fallback"]
+    # smart-gpt (GPT-5.4、社員向け本番応答) → GPT-4o → **Opus 4.8 (Anthropic)**
+    # ★2026-07-29 実障害で判明: 旧定義は ["smart-fallback"] だけで、その実体は openai/gpt-4o =
+    #   **同一 provider**。「OpenAI quota 全断時の保険」というコメントに反し、OpenAI が落ちると
+    #   逃げ道も同時に落ちて社員向け応答が全断した (ログ: "Error doing the fallback")。
+    #   末尾に Anthropic を必ず置き、provider 単位の障害を跨げるようにする。
+    - smart-gpt: ["smart-fallback", "smart"]
+    # fast-gpt (GPT-5.4-mini、wiki compile) にも Anthropic 逃げ道 (旧: fallback 定義なし = 即死)
+    - fast-gpt: ["fast-anthropic", "smart-sonnet"]
+    # GPT-5.6 系も **Anthropic 終端**を必須にする (2026-07-28 の OpenAI 全断で、
+    # 同一 provider 内 fallback は保険にならないことが実証済み)。
+    - smart-luna: ["smart-terra", "smart-gpt", "smart"]
+    - smart-terra: ["smart-gpt", "smart"]
     # supervisor (Fable 5) → Opus 4.8 → GPT-4o (= Fable 5 未提供/quota 時も監督者層は稼働継続)
     - supervisor: ["smart", "smart-fallback"]
+    # ローカル (Ollama) 停止時は OpenAI へ逃がす = ローカル障害で本番を止めない
+    - local-qwen: ["fast-gpt", "smart-gpt"]
   # 400/429 もフォールバック対象に (既定は 5xx のみ)。各 model 3 回 retry してから次 fallback へ。
   num_retries: 3
   request_timeout: 60

@@ -23,25 +23,25 @@ from chat_import import (  # noqa: E402
 )
 
 LINE_SPACE_SAMPLE = """2026.04.17 金曜日
-17:45 aida aidaがTake Umiyamaをグループに追加しました。
-17:46 会田次郎 @All グループ作りました
+17:45 nakatani nakataniがTake Umiyamaをグループに追加しました。
+17:46 中谷一郎 @All グループ作りました
 18:36 Take Umiyama 宜しくお願いします。
-18:59 会田次郎 ざっくりと備忘録です。
+18:59 中谷一郎 ざっくりと備忘録です。
 ・KPIを2つに分ける
 ・全社と部門のKPIを整理
 19:01 Take Umiyama ありがとうございます
 2026.04.20 月曜日
-20:57 aida 次回日程の候補です
+20:57 nakatani 次回日程の候補です
 21:02 Take Umiyama 5/1大丈夫です。
-21:43 aida ありがとうございます。
+21:43 nakatani ありがとうございます。
 23:03 Take Umiyama 11時とかなら大丈夫。
 """
 
-WA_JP_SAMPLE = """[24/7/25 午後5:46:23] John Smith: Hi Take San ... quick update
-[24/7/25 午後5:46:28] John Smith: we are sorted for 4 banks
+WA_JP_SAMPLE = """[24/7/25 午後5:46:23] Abhishek Gupta: Hi Take San ... quick update
+[24/7/25 午後5:46:28] Abhishek Gupta: we are sorted for 4 banks
 [25/7/25 午前9:12:00] Take Umiyama: Thanks, will check
 [25/7/25 午前12:05:00] Take Umiyama: midnight edge
-[25/7/25 午後12:30:00] John Smith: noon edge
+[25/7/25 午後12:30:00] Abhishek Gupta: noon edge
 [26/7/25 午後11:59:59] Take Umiyama: multi
 line body
 """
@@ -58,7 +58,7 @@ def test_line_space_variant_parses_multitoken_sender(tmp_path):
     senders = {m["sender"] for m in msgs}
     # 空白を含む sender が正しく境界検出される (頻度ベース最長一致)
     assert "Take Umiyama" in senders
-    assert "aida" in senders and "会田次郎" in senders
+    assert "nakatani" in senders and "中谷一郎" in senders
     # "Take" 単独 や "Take Umiyama 宜しくお願いします。" のような誤分割が無い
     assert "Take" not in senders
     # 全メッセージに正規化済み日付が付く (ドット → ハイフン)
@@ -92,7 +92,7 @@ def test_line_tab_format_regression(tmp_path):
 
 @pytest.mark.smoke
 def test_whatsapp_jp_locale_am_pm(tmp_path):
-    f = tmp_path / "WhatsApp_Chat_-_John_Smith.txt"
+    f = tmp_path / "WhatsApp_Chat_-_Abhishek_Gupta.txt"
     f.write_text(WA_JP_SAMPLE, encoding="utf-8")
     assert detect_chat_format(WA_JP_SAMPLE) == "whatsapp"
     msgs = parse_whatsapp_export(f)
@@ -105,4 +105,4 @@ def test_whatsapp_jp_locale_am_pm(tmp_path):
     assert times[5] == "23:59:59"
     assert msgs[0]["date"] == "2025-07-24"   # DD/M/YY → ISO
     assert "multi\nline body" in msgs[5]["text"]
-    assert {m["sender"] for m in msgs} == {"John Smith", "Take Umiyama"}
+    assert {m["sender"] for m in msgs} == {"Abhishek Gupta", "Take Umiyama"}

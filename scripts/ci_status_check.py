@@ -31,7 +31,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger("ci_status_check")
 
 STATE_PATH = IMPROVE_DIR / "ci_status_state.json"
-REPO = "your-org/your-repo"  # origin (private)。gh は origin remote から自動解決も可
+REPO = "umiyama0-commits/brain-agent"  # origin (private)。gh は origin remote から自動解決も可
 BRANCH = "main"
 
 
@@ -130,7 +130,8 @@ def run(dry_run: bool = False) -> int:
         return 0
 
     line_push(
-        f"🔴 CI が赤: {BRANCH} ({latest.get('workflowName', 'tests')})\n"
+        critical=True,  # ★2026-08-03 ADR 2026-07-20: CI 赤は即時
+        text=f"🔴 CI が赤: {BRANCH} ({latest.get('workflowName', 'tests')})\n"
         f"{latest.get('displayTitle', '')[:70]}\n"
         f"conclusion={conclusion} [{sha}]\n"
         f"{latest.get('url', '')}\n"

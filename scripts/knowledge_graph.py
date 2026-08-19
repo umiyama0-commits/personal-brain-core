@@ -10,22 +10,22 @@ knowledge_graph.py — 軽量 in-process knowledge graph (Phase 1)
   - bi-temporal (snapshot 単位で時間軸を持つ、過去日付指定可)
 
 Phase 1 で答えられるクエリ:
-  - 「○○AM が現在管轄してる店一覧」 (1-hop: am → stores)
-  - 「○○AM が管轄してた店のうち今は別 AM」 (2-hop temporal diff)
+  - 「中田AM が現在管轄してる店一覧」 (1-hop: am → stores)
+  - 「中田AM が管轄してた店のうち今は別 AM」 (2-hop temporal diff)
   - 「鈴木 SV の AM (上司) は誰?」 (1-hop: sv → am)
   - 「ある SV が直近 6 ヶ月で AM 替わったか」 (temporal trace)
   - 「同じ都道府県に複数 AM がいるか」 (1-hop: prefecture → am)
 
 Phase 2 (将来):
   - Neo4j + Graphiti 統合 (multi-tenant、永続化、Cypher クエリ)
-  - 「○○AM の管轄店出身の店長がいる店」型の 3-hop+
+  - 「中田AM の管轄店出身の店長がいる店」型の 3-hop+
   - LLM 経由の natural language query → Cypher 自動生成
 
 実行:
   python3 scripts/knowledge_graph.py --list-snapshots
   python3 scripts/knowledge_graph.py --build 2026-05-19           # load snapshot
-  python3 scripts/knowledge_graph.py --query am-stores "見本AM二郎"
-  python3 scripts/knowledge_graph.py --query diff-am-stores "見本AM二郎" \\
+  python3 scripts/knowledge_graph.py --query am-stores "中田将也"
+  python3 scripts/knowledge_graph.py --query diff-am-stores "中田将也" \\
                                             --from 2026-04-01 --to 2026-05-19
 """
 from __future__ import annotations

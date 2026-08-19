@@ -37,7 +37,7 @@ from ai_research_agent import (  # noqa: E402  公開 fetcher を再利用(重�
 from build_analysis_wiki import build_analysis_wiki  # noqa: E402
 
 try:
-    from clone_improve_lib import call_llm, line_push  # noqa: E402
+    from clone_improve_lib import call_llm, line_push, line_push_digest  # noqa: E402
 except Exception:  # テスト・最小環境では stub(注入で差し替え)
     async def call_llm(*a, **k):  # type: ignore
         raise RuntimeError("call_llm unavailable")
@@ -157,7 +157,7 @@ def build_push(body: str) -> str:
 async def run(*, dry_run: bool = False, push: bool = True, write_wiki: bool = True,
               llm=None, push_fn=None) -> dict:
     """fetch → synthesize → (wiki write) → (LINE push)。各 fetch は best-effort。"""
-    push_fn = push_fn or line_push
+    push_fn = push_fn or (lambda t: line_push_digest(t, "AI提言"))  # ★2026-07-20 通知削減
     papers: list[dict] = []
     stories: list[dict] = []
     vendors: list[dict] = []

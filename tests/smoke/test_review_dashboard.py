@@ -266,7 +266,7 @@ def test_memory_detail_page_renders(brain_root):
     importlib.reload(clone_memory)
     importlib.reload(clone_history)
     clone_memory.save("u_detail_001",
-                      "## Profile\n営業 head\n## Ongoing Topics\n海外出店\n## Key Facts\n5 年目\n## Preferences\n数字 first\n",
+                      "## Profile\n営業 head\n## Ongoing Topics\n龍仁出店\n## Key Facts\n5 年目\n## Preferences\n数字 first\n",
                       user_display="田中 太郎", turn_count=12)
     clone_history.append("u_detail_001", "user", "売上どう?", user_display="田中 太郎")
     clone_history.append("u_detail_001", "assistant", "20M、客数 1228", user_display="田中 太郎")
@@ -279,7 +279,7 @@ def test_memory_detail_page_renders(brain_root):
     assert "社員 " in html
     # memory 内容
     assert "営業 head" in html
-    assert "海外出店" in html
+    assert "龍仁出店" in html
     # 会話履歴 bubble
     assert "売上どう?" in html
     assert "20M" in html

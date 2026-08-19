@@ -29,6 +29,15 @@ def _seed(tmp_path):
     reflux.WIKI_DIR = wiki
     reflux.QUEUE = tmp_path / "reflux_queue.jsonl"
     reflux.CORE_TARGET = wiki / "judgment" / "reflux-distilled.md"
+    # ★2026-08-03 入力 digest skip の追加に伴い必須。redirect し忘れると ①実 repo の
+    # data/brain/.reflux_input_digest.json を test fixture の値で汚染し ②同 session の
+    # 2 本目以降が「入力不変」と誤判定されて蒸留を skip する (実際に踏んだ)。
+    reflux.DIGEST_STATE = tmp_path / "reflux_input_digest.json"
+    # ★§1.15 Reviewer L2: run() は loud_fail を実呼び出しするので、redirect しないと
+    # Mac Studio で pytest を回すたびに **実 repo の LOUD_FAIL_STATE が ok=True で上書き**され、
+    # 本物の障害 streak が消える (監視を壊すテスト)。
+    import clone_improve_lib
+    clone_improve_lib.LOUD_FAIL_STATE = tmp_path / "loud_fail_state.json"
     return wiki
 
 

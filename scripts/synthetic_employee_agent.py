@@ -71,9 +71,24 @@ MAX_QUERIES = int(os.getenv("SYNTHETIC_AGENT_MAX_QUERIES", "20"))   # cost 暴�
 MAX_AUTOFIX = int(os.getenv("SYNTHETIC_AGENT_MAX_AUTOFIX", "3"))    # alias 自律追記/run 上限
 QUERIES_PER_PERSONA = int(os.getenv("SYNTHETIC_AGENT_QPP", "4"))
 
-# bot=smart(Opus) / 生成・診断=smart-gpt(GPT-5.4) 系列分離 (self-eval loop 遮断, §1.15)
-BOT_MODEL = os.getenv("SYNTHETIC_AGENT_BOT_MODEL", "smart")
-GEN_MODEL = os.getenv("SYNTHETIC_AGENT_GEN_MODEL", "smart-gpt")
+# ★2026-08-03 実測で判明した試験の無効化: BOT_MODEL 既定が "smart" (Opus) 固定だったため、
+# 本番が CLONE_PUBLIC_PROD_MODEL=smart-gpt (GPT-5.4) に切り替わった後も **本番ではないモデルを
+# 月 $34.6 かけて試験し続けていた** (2026-06-07 のコメントは bot=Opus 時代の前提のまま陳腐化)。
+# 「社員に扮して本番 bot を叩く」のが本 script の要件なので、被験体は本番に追随させる。
+# 生成・診断側は pick_cross_family_judge で自動的に別系列を選ぶ (§1.15 self-eval loop 遮断)。
+BOT_MODEL = os.getenv("SYNTHETIC_AGENT_BOT_MODEL",
+                      os.getenv("CLONE_PUBLIC_PROD_MODEL", "smart"))
+
+
+def _default_gen_model() -> str:
+    try:
+        from clone_improve_lib import pick_cross_family_judge
+        return pick_cross_family_judge(BOT_MODEL)
+    except Exception:
+        return "smart" if BOT_MODEL != "smart" else "smart-gpt"
+
+
+GEN_MODEL = os.getenv("SYNTHETIC_AGENT_GEN_MODEL", "") or _default_gen_model()
 
 # ─── 既存 helper 再利用 (= 二重実装回避) ──────────────────────────────
 _SCRIPTS = Path(__file__).resolve().parent
@@ -388,11 +403,17 @@ async def run_all(sample: int | None = None, dry_run: bool = False, push: bool =
         logger.info("SYNTHETIC_AGENT_ENABLED=0 → skip")
         return {"skipped": "disabled"}
 
-    # ★系列分離の強制 (env 上書きで bot=judge が同一 model = self-eval loop に退化する事故を防ぐ)
-    # 注: litellm alias は smart(=Opus)/smart-gpt(=GPT) のように別系列でも prefix 共有 → 完全一致で判定。
-    if BOT_MODEL == GEN_MODEL:
-        logger.error(f"model 衝突: bot と 生成・診断 が同一 model ({BOT_MODEL}) → self-eval loop。中止 (§1.15)。")
-        return {"error": "model_family_collision", "bot_model": BOT_MODEL, "gen_model": GEN_MODEL}
+    # ★系列分離の強制 (env 上書きで bot=judge が同一系列 = self-eval loop に退化する事故を防ぐ)
+    # ★2026-08-03 §1.15 DA 実証: 従来は alias の完全一致だけを見ていたため、.env に生 ID
+    # (CLONE_PUBLIC_PROD_MODEL=gpt-5.4 等) を入れると bot=gpt-5.4 / gen=smart-gpt = **どちらも
+    # OpenAI なのに文字列が違う**ので素通りし、防壁が無音で消えた。**系列**で判定する。
+    from clone_improve_lib import model_family
+    _bf, _gf = model_family(BOT_MODEL), model_family(GEN_MODEL)
+    if BOT_MODEL == GEN_MODEL or (_bf == _gf and _bf != "other"):
+        logger.error(f"model 衝突: bot={BOT_MODEL}({_bf}) と 生成・診断={GEN_MODEL}({_gf}) が"
+                     f"同一系列 → self-eval loop。中止 (§1.15)。")
+        return {"error": "model_family_collision", "bot_model": BOT_MODEL, "gen_model": GEN_MODEL,
+                "bot_family": _bf, "gen_family": _gf}
 
     if AUTOFIX:
         logger.warning(f"SYNTHETIC_AGENT_AUTOFIX=1: keyword_miss の確実な別表記のみ自律追記 (cap {MAX_AUTOFIX}/run)")

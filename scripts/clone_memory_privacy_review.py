@@ -45,7 +45,7 @@ from pathlib import Path
 from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from clone_improve_lib import call_llm, line_push, append_jsonl, ensure_dirs, JST
+from clone_improve_lib import call_llm, line_push, line_push_digest, append_jsonl, ensure_dirs, JST
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("clone_memory_privacy_review")
@@ -349,11 +349,12 @@ async def main():
             warn.append(f"⚠️ JSON parse 失敗 {n_parse_failed} 名 (= PII 取りこぼし疑い、review 不発)")
         if n_retained:
             warn.append(f"⚠️ private 検出も 0 除去 {n_retained} 名 (= 行照合の取りこぼし疑い)")
-        line_push(
+        line_push_digest(
             f"🔒 clone_memory privacy review ({today})\n"
             f"reviewed: {len(users)} 名 / 除去行: {total_removed} 件\n"
             + ("\n".join(warn) + "\n" if warn else "")
-            + f"詳細: {out_path}"
+            + f"詳細: {out_path}",
+            "privacy",
         )
 
     return 0

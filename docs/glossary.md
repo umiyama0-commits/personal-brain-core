@@ -47,7 +47,7 @@
 - **mobile.owndays.net** — OWNDAYS Net Mobile (社内売上ダッシュボード、scraper 経由で取得)
 - **Recall.ai** — Meet/Zoom/Teams 横断の bot ベース transcript 取得サービス
 - **Plaud Note** — カード型ボイスレコーダ (iPhone 背面装着、対面会議の transcript 用)
-- **Vapi** — 電話ベース音声 AI プラットフォーム (Deepgram nova-2 STT + OpenAI TTS、車内日本語音声アラインメント用、番号 `+1 XXX XXX XXXX`)
+- **Vapi** — 電話ベース音声 AI プラットフォーム (Deepgram nova-2 STT + OpenAI TTS、車内日本語音声アラインメント用、番号 `+1 572 726 9551`)
 - **STAPA** — OWNDAYS 社内メルマガサービス
 - **LINE Works** — OWNDAYS 全社で使う業務チャット (うみやまAI Bot の宿主)
 

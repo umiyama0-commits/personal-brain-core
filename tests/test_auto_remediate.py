@@ -23,6 +23,9 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 def tmp_alert_log(tmp_path, monkeypatch):
     monkeypatch.setenv("BRAIN_APP_ROOT", str(tmp_path))
     monkeypatch.setenv("AUTO_REMEDIATE_ENABLED", "1")
+    # ★2026-08-14: 実在の /tmp/brain_auto_deploy.lock を見に行かせない。auto_deploy が
+    # lock を持っている Mac Studio で pytest を回すと、無関係な既存 test が flaky になる。
+    monkeypatch.setenv("BRAIN_DEPLOY_LOCK", str(tmp_path / "nolock"))
     if "bot_uptime_monitor" in sys.modules:
         del sys.modules["bot_uptime_monitor"]
     mod = importlib.import_module("bot_uptime_monitor")
@@ -146,3 +149,45 @@ def test_attempt_restart_timeout(tmp_alert_log):
     assert r["attempted"] is True
     assert r["ok"] is False
     assert "timeout" in r["detail"]
+
+
+# ─── メンテ lock 尊重 (★2026-08-14 chroma 計画 rebuild) ───
+def test_deploy_lock_held_when_fresh(tmp_alert_log, tmp_path):
+    """auto_deploy / 計画 rebuild が lock を持っている間は保持中と判定する。"""
+    mod = tmp_alert_log
+    lock = tmp_path / "brain_auto_deploy.lock"
+    lock.mkdir()
+    mod.DEPLOY_LOCK_DIR = lock
+    assert mod._deploy_lock_held() != ""
+
+
+def test_deploy_lock_ignored_when_stale(tmp_alert_log, tmp_path):
+    """30 分超の残骸 lock は無視 = 置き去り lock で自動復旧が永久に死なない。"""
+    import os as _os
+    import time as _time
+    mod = tmp_alert_log
+    lock = tmp_path / "brain_auto_deploy.lock"
+    lock.mkdir()
+    old = _time.time() - 45 * 60
+    _os.utime(lock, (old, old))
+    mod.DEPLOY_LOCK_DIR = lock
+    assert mod._deploy_lock_held() == ""
+
+
+def test_deploy_lock_absent(tmp_alert_log, tmp_path):
+    mod = tmp_alert_log
+    mod.DEPLOY_LOCK_DIR = tmp_path / "no-such-lock"
+    assert mod._deploy_lock_held() == ""
+
+
+def test_attempt_restart_skipped_during_maintenance(tmp_alert_log, tmp_path):
+    """rebuild 中の 5 分 cron が restart を撃たない (削除途中の索引で chroma を開かせない)。"""
+    mod = tmp_alert_log
+    lock = tmp_path / "brain_auto_deploy.lock"
+    lock.mkdir()
+    mod.DEPLOY_LOCK_DIR = lock
+    with patch.object(mod.subprocess, "run") as run:
+        r = mod.attempt_auto_restart(reason="bot_dead")
+    run.assert_not_called()
+    assert r["attempted"] is False
+    assert "lock" in r["detail"]

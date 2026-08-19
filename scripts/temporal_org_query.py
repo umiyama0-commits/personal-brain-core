@@ -3,7 +3,7 @@
 temporal_org_query.py — 組織情報の時系列クエリ helper (項目 5 Phase 1)
 
 graph DB を入れない軽量実装。store master の月次 snapshot を bi-temporal で保持し、
-「半年前の○○AMの担当 SV」「FY25 当時の○○店の店長」型の query に答える。
+「半年前の中田AMの担当 SV」「FY25 当時の○○店の店長」型の query に答える。
 
 設計:
   - snapshot 場所: data/brain/wiki/knowledge/history/org-snapshots/YYYY-MM-DD.json
@@ -13,10 +13,10 @@ graph DB を入れない軽量実装。store master の月次 snapshot を bi-te
 
 CLI:
   python3 scripts/temporal_org_query.py --date 2026-05-15
-  python3 scripts/temporal_org_query.py --date 2026-04-01 --am 見本AM二郎
+  python3 scripts/temporal_org_query.py --date 2026-04-01 --am 中田将也
   python3 scripts/temporal_org_query.py --date 2026-05-15 --store 池袋西口
-  python3 scripts/temporal_org_query.py --date 2026-05-15 --sv 見本SV一郎
-  python3 scripts/temporal_org_query.py --history-am 見本AM二郎
+  python3 scripts/temporal_org_query.py --date 2026-05-15 --sv 鈴木和典
+  python3 scripts/temporal_org_query.py --history-am 中田将也
 
 brain_wiki.py から import で呼ばれる:
   from scripts.temporal_org_query import (
@@ -24,7 +24,7 @@ brain_wiki.py から import で呼ばれる:
   )
 
 将来 Phase 2:
-  Graphiti / Neo4j 統合で multi-hop ("○○AMが管轄してた店のうち今は他 AM" 等)
+  Graphiti / Neo4j 統合で multi-hop ("中田AMが管轄してた店のうち今は他 AM" 等)
 """
 from __future__ import annotations
 

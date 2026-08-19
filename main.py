@@ -116,6 +116,11 @@ _STATIC_DIR = "/app/static" if os.path.isdir("/app/static") \
     else str(Path(__file__).resolve().parent / "static")
 app.mount("/static", StaticFiles(directory=_STATIC_DIR, check_dir=False), name="static")
 
+# ★2026-07-21 海山: whitespace ダッシュボードは SSO (owndays-platform.com) へ移設。旧 brain.example.com の
+# /whitespace* ルートは SSO へ 302 redirect (下記) = 旧ブックマーク救済 + token 口の閉鎖。env で差し替え可。
+# (store-survey は AM が入力中の実運用フォームのため retire せず据え置き — 別途 token gate 維持。)
+WHITESPACE_SSO_URL = os.getenv("WHITESPACE_SSO_URL", "https://whitespace.owndays-platform.com")
+
 
 def _whitespace_guard(token: str, path_hint: str) -> "HTMLResponse | None":
     """whitespace ダッシュボードの token gate。認可 NG なら 401 HTMLResponse、OK なら None。
@@ -146,77 +151,35 @@ def _whitespace_guard(token: str, path_hint: str) -> "HTMLResponse | None":
     return None
 
 
-@app.get("/whitespace", response_class=HTMLResponse)
+def _whitespace_retired_redirect():
+    """★2026-07-21 海山: whitespace は SSO (owndays-platform.com) へ移設。旧 brain.example.com の
+    ダッシュボード配信 (token 口) は retire、SSO ベース URL へ 302 (旧ブックマーク救済 + 旧口の閉鎖)。"""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(WHITESPACE_SSO_URL, status_code=302)
+
+
+@app.get("/whitespace")
 async def whitespace_dashboard(token: str = ""):
-    """眼鏡チェーン空白地 インタラクティブ散布図 (社内共有用)。
-
-    URL: brain.example.com/whitespace 。`.env` の WHITESPACE_TOKEN で `?token=...` 必須の gate。
-    ★fail-closed: token 未設定なら停止 (公開されない)。
-    配信元は mounted な data/brain/web/scatter_interactive.html を優先 (更新が git pull のみで
-    反映 = rebuild 不要)、無ければ baked な static/ にフォールバック。
-    """
-    denied = _whitespace_guard(token, "/whitespace")
-    if denied is not None:
-        return denied
-    # ★2026-07-02 P1g reviewer 指摘: /static は無認証 mount のため、baked fallback を static/ に
-    # 置くと token gate を素通りで閲覧できてしまう (実際に leak していた)。static fallback は廃止、
-    # 配信元は mount 外の data/brain/web/ のみ (open() 経由 = 本 handler の gate を必ず通る)。
-    for path in ("/app/data/brain/web/scatter_interactive.html",):
-        try:
-            body = open(path, encoding="utf-8").read()
-            # dashboard は頻繁に更新するので常に最新を配信 (no-cache)
-            return HTMLResponse(body, headers={"Cache-Control": "no-cache, must-revalidate"})
-        except FileNotFoundError:
-            continue
-    return HTMLResponse("<h2>dashboard 未配置</h2>", status_code=404)
+    """retired → SSO (owndays-platform.com)。旧 brain.example.com/whitespace は 302 redirect。"""
+    return _whitespace_retired_redirect()
 
 
-@app.get("/whitespace-tw", response_class=HTMLResponse)
+@app.get("/whitespace-tw")
 async def whitespace_dashboard_tw(token: str = ""):
-    """台灣 眼鏡連鎖 展店空白分析 (繁體中文、散佈圖+地圖)。URL: brain.example.com/whitespace-tw 。
-    日本版 /whitespace と同じく WHITESPACE_TOKEN gate (fail-closed) + mounted data/brain/web/ 優先配信。"""
-    denied = _whitespace_guard(token, "/whitespace-tw")
-    if denied is not None:
-        return denied
-    for path in ("/app/data/brain/web/scatter_interactive_tw.html",):
-        try:
-            body = open(path, encoding="utf-8").read()
-            return HTMLResponse(body, headers={"Cache-Control": "no-cache, must-revalidate"})
-        except FileNotFoundError:
-            continue
-    return HTMLResponse("<h2>台灣 dashboard 未配置</h2>", status_code=404)
+    """retired → SSO。旧 /whitespace-tw は 302 redirect。"""
+    return _whitespace_retired_redirect()
 
 
-@app.get("/whitespace-sg", response_class=HTMLResponse)
+@app.get("/whitespace-sg")
 async def whitespace_dashboard_sg(token: str = ""):
-    """Singapore Eyewear Chains — OWNDAYS Whitespace (English, map-first + scatter). URL: brain.example.com/whitespace-sg 。
-    店舗供給は公式 store-locator API (OWNDAYS/Lenskart/Zoff)。日本版 /whitespace と同じ WHITESPACE_TOKEN gate (fail-closed) + mounted data/brain/web/ 優先配信。"""
-    denied = _whitespace_guard(token, "/whitespace-sg")
-    if denied is not None:
-        return denied
-    for path in ("/app/data/brain/web/scatter_interactive_sg.html",):
-        try:
-            body = open(path, encoding="utf-8").read()
-            return HTMLResponse(body, headers={"Cache-Control": "no-cache, must-revalidate"})
-        except FileNotFoundError:
-            continue
-    return HTMLResponse("<h2>Singapore dashboard 未配置</h2>", status_code=404)
+    """retired → SSO。旧 /whitespace-sg は 302 redirect。"""
+    return _whitespace_retired_redirect()
 
 
-@app.get("/whitespace-th", response_class=HTMLResponse)
+@app.get("/whitespace-th")
 async def whitespace_dashboard_th(token: str = ""):
-    """Thailand Eyewear Chains — OWNDAYS Whitespace (English, 郡928・地図優先)。URL: brain.example.com/whitespace-th 。
-    OWNDAYS/Lenskart は公式 store-locator API。日本版 /whitespace と同じ WHITESPACE_TOKEN gate (fail-closed) + mounted data/brain/web/ 優先配信。"""
-    denied = _whitespace_guard(token, "/whitespace-th")
-    if denied is not None:
-        return denied
-    for path in ("/app/data/brain/web/scatter_interactive_th.html",):
-        try:
-            body = open(path, encoding="utf-8").read()
-            return HTMLResponse(body, headers={"Cache-Control": "no-cache, must-revalidate"})
-        except FileNotFoundError:
-            continue
-    return HTMLResponse("<h2>Thailand dashboard 未配置</h2>", status_code=404)
+    """retired → SSO。旧 /whitespace-th は 302 redirect。"""
+    return _whitespace_retired_redirect()
 
 
 @app.get("/store-survey", response_class=HTMLResponse)
@@ -233,9 +196,25 @@ async def store_survey_form(token: str = ""):
         return HTMLResponse("<h2>入力フォーム未配置</h2>", status_code=404)
 
 
+@app.get("/api/store-survey")
+async def store_survey_load(token: str = ""):
+    """統合済みの入力状況を返す(★2026-07-16 AM報告「他の人の完了が見えない」対応)。
+    フォームが起動時に読み、全員分の完了表示に使う。"""
+    denied = _whitespace_guard(token, "/api/store-survey")
+    if denied is not None:
+        return denied
+    p = "/app/data/brain/import/store_survey/latest.json"
+    try:
+        return JSONResponse(json.load(open(p, encoding="utf-8")))
+    except Exception:
+        return JSONResponse({"stores": {}})
+
+
 @app.post("/api/store-survey")
 async def store_survey_save(request: Request, token: str = ""):
-    """入力フォームの回答保存。追記 JSONL(履歴) + latest.json(最新全量)。token gate は GET と共通。"""
+    """入力フォームの回答保存。追記 JSONL(履歴・完全保全) + latest.json は**店番ごとのマージ**。
+    ★2026-07-16 AM報告「最後に入れた人が上書き?」→ 旧実装は全量置換で他 AM の分が latest から消えていた
+    (履歴には全送信が残存=データ喪失なし)。マージ化: 送信に入っている店だけ更新、空レコードは無視。"""
     denied = _whitespace_guard(token, "/api/store-survey")
     if denied is not None:
         return denied
@@ -249,10 +228,18 @@ async def store_survey_save(request: Request, token: str = ""):
     ts = _dt.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     with open(f"{d}/submissions.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps({"ts": ts, "payload": payload}, ensure_ascii=False) + "\n")
+    try:
+        merged = json.load(open(f"{d}/latest.json", encoding="utf-8")).get("stores") or {}
+    except Exception:
+        merged = {}
+    n_new = 0
+    for code, rec in (payload.get("stores") or {}).items():
+        if isinstance(rec, dict) and (rec.get("traffic") or rec.get("tags") or rec.get("memo")):
+            merged[str(code)] = rec   # その店を実際に入力した内容のみ per-store 上書き
+            n_new += 1
     with open(f"{d}/latest.json", "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=1)
-    n = len((payload.get("stores") or {}))
-    return JSONResponse({"ok": True, "stores": n, "ts": ts})
+        json.dump({"v": 2, "kind": "traffic_tags", "updated": ts, "stores": merged}, f, ensure_ascii=False, indent=1)
+    return JSONResponse({"ok": True, "sent": n_new, "total": len(merged), "ts": ts})
 
 
 @app.get("/eval-form/{month}", response_class=HTMLResponse)
@@ -421,6 +408,24 @@ def brain_auth_tier(request: Request) -> str:
     return "token"
 
 
+def require_admin_key(request: Request) -> str:
+    """admin-tier (BRAIN_EXTENSION_KEY) 必須の依存。弱い VOICE_ALIGN_TOKEN fallback を拒否。
+
+    ★2026-07-14 世界基準評価: /api/brain/chat は run_agent を呼び interview/ (家族/弱さ/金/体)
+    + Gmail + Drive の最機微に到達するのに require_api_key のみ = 弱い ?token= fallback でも
+    通っていた。LINE webhook 経路は #37 で is_admin fail-closed 済なのに HTTP 経路だけ漏れ、
+    自らの脅威モデルと矛盾。require_api_key の 503/401 セマンティクスは維持しつつ、token tier は
+    403 で弾く (= brain_auth_tier=='admin' 必須。正規 chat UI は Bearer <admin key> なので不変)。
+    """
+    require_api_key(request)  # BRAIN_EXTENSION_KEY 未設定=503 / 完全無効=401 を先に確定
+    if brain_auth_tier(request) != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="admin key required (weak dashboard token cannot reach this endpoint)",
+        )
+    return "admin"
+
+
 # ─── 署名検証 ───
 def verify_signature(body: bytes, signature: str) -> bool:
     hash = hmac.new(
@@ -543,23 +548,10 @@ def _plan_quick_reply(task_id: str) -> list[dict]:
 CLAUDE_REVISE_TTL = int(os.getenv("CLAUDE_REVISE_TTL", "3600"))  # 1h
 CLAUDE_PLAN_TTL = int(os.getenv("CLAUDE_PLAN_TTL", "86400"))     # 24h
 
-PURPOSE_QUICK_REPLY = [
-    {"label": "1️⃣ Wikiの更新", "data": "purpose=wiki", "display": "1️⃣ Wikiの更新"},
-    {"label": "2️⃣ システム修正", "data": "purpose=fix", "display": "2️⃣ システム修正"},
-    {"label": "💬 普通の会話", "data": "purpose=chat", "display": "💬 普通の会話"},
-]
-
-
-async def _has_pending_system_question(r: redis.Redis, user_id: str) -> bool:
-    """システムがユーザーに回答を求めている状態かを判定"""
-    # アライメント質問待ち
-    if await r.get(f"align:{user_id}"):
-        return True
-    return False
-
-
-async def _store_pending_input(r: redis.Redis, user_id: str, message: str) -> None:
-    await r.setex(f"pending_input:{user_id}", PENDING_INPUT_TTL_SEC, message)
+# ★2026-07-20 Umiyama AI Agent 正式化: 目的選択 Quick Reply は廃止 (通常テキスト = run_agent 直行)。
+# PURPOSE_QUICK_REPLY / _store_pending_input / _has_pending_system_question は dead code として削除。
+# _pop_pending_input と _handle_purpose_postback は過去メッセージの stale ボタン tap を
+# 無害に処理するため残置 (数週間後に掃討可)。
 
 
 async def _pop_pending_input(r: redis.Redis, user_id: str) -> str | None:
@@ -1374,6 +1366,25 @@ def _fetch_drive_context(query: str, max_files: int = 10, read_content: bool = F
 
 
 # ─── LLM エージェント呼び出し ───
+def _is_business_data_query(message: str) -> bool:
+    """売上/客数等の業務データ・社内規程・施設商圏の照会か (= clone 回答エンジンへ pre-route)。
+    ロジックは brain_wiki_helpers/business_intent (§1.12b、単体テスト可能)。施設検出は
+    lookup_service を注入。"""
+    def _facility(m):
+        try:
+            from scripts.tenpo import lookup_service as _tls
+            return bool(_tls.clone_context(m, admin=True))
+        except Exception:
+            return False
+    from brain_wiki_helpers.business_intent import is_business_data_query
+    return is_business_data_query(message, facility_detector=_facility)
+
+
+def _is_business_followup(message: str) -> bool:
+    from brain_wiki_helpers.business_intent import is_business_followup
+    return is_business_followup(message)
+
+
 async def run_agent(
     app,
     http: httpx.AsyncClient,
@@ -1384,12 +1395,47 @@ async def run_agent(
     """
     LiteLLM 経由でLLMを呼び出す。
     メッセージの意図に応じてカレンダー・メール・Drive・Wikiを横断取得。
+    業務データ質問は先頭で clone 回答エンジンへ pre-route (verbatim, ガード保証)。
     """
     history_key = f"chat:{user_id}"
 
     # 直近の会話履歴を取得 (最大20ターン)
     raw_history = await r.lrange(history_key, -40, -1)
     messages = [json.loads(m) for m in raw_history]
+
+    # ★2026-07-20 海山「うみやまAIと同じ質問・回答機能も持たせたい」+ §1.15 cross-check 反映:
+    # 業務データ (売上/客数/予算比/前年比/制度規程/施設商圏) の質問は、社員向けと**同一の回答
+    # エンジン** (_safe_clone_respond = canonical 注入 + sales_numeric_guard 桁事故ガード) へ決定論
+    # pre-route し、その出力を **verbatim** で返す (外側 agent LLM を挟まない = ガード保証)。
+    # ★フォローアップ対応 (「日本の」型): 直前が売上応答なら短い継続語も業務照会扱いにし、直前の
+    #   売上質問と併合した effective query を渡す (単独では日付/次元が無く retrieval が失敗するため)。
+    _prev_user = next((m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), "")
+    _biz_direct = _is_business_data_query(user_message)
+    _biz_follow = (
+        not _biz_direct
+        and _is_business_data_query(_prev_user)          # 直前が売上質問
+        and _is_business_followup(user_message)          # 今回が短い継続語
+    )
+    if _biz_direct or _biz_follow:
+        effective = user_message
+        if _biz_follow:
+            # ★cross-check DA: 前クエリの次元(エリア/業態)ではなく日付だけ引き継ぐ =
+            #   今回メッセージの次元(「日本の」「業態別」)を優先 (次元シャドウ防止)。
+            from brain_wiki_helpers.business_intent import extract_date_phrase
+            _dp = extract_date_phrase(_prev_user)
+            effective = f"{_dp} {user_message}".strip() if _dp else user_message
+        logger.info(f"[run_agent] business pre-route ({'follow' if _biz_follow else 'direct'}) "
+                    f"→ clone: {effective[:60]!r}")
+        reply = await _safe_clone_respond(
+            app.state.brain, effective,
+            history=messages[-6:],
+            model=os.getenv("CLONE_PUBLIC_PROD_MODEL", "smart"),
+        )
+        await r.rpush(history_key, json.dumps({"role": "user", "content": user_message}))
+        await r.rpush(history_key, json.dumps({"role": "assistant", "content": reply}))
+        await r.ltrim(history_key, -40, -1)
+        await r.expire(history_key, 86400 * 7)
+        return reply
 
     # 常にカレンダーを軽量取得（意図推測の文脈として使う）
     calendar_summary = ""
@@ -1485,44 +1531,30 @@ async def run_agent(
     # 自己改善パッチを読み込み
     prompt_patches = load_system_prompt_patches()
 
-    system = {
-        "role": "system",
-        "content": (
-            "あなたはOWNDAYS CEO 海山丈司のパーソナルAIアシスタントです。\n"
-            "24時間稼働し、スケジュール管理、メール確認、資料検索、知識ベース参照が可能です。\n\n"
-            "【重要ルール】\n"
-            "- 以下に取得済みデータが含まれています。このデータを使って具体的に回答してください。\n"
-            "- 「AIなのでファイルを読めません」「直接アクセスできません」等の回答は絶対に禁止です。\n"
-            "- 「ファイルの直接読み込みや学習は行えません」等のAI制限に言及する回答も禁止です。\n"
-            "- 「Brain Wikiに該当情報がありません」ではなく、Driveのデータが提供されていればそれを使え。\n"
-            "- スプレッドシートやCSVデータが提供されている場合は、具体的な数値（金額、%、件数等）を引用して回答せよ。\n"
-            "- ファイルを要求された場合は、Google DriveのURLリンクを提供せよ。\n"
-            "- データが本当にどこにもない場合のみ「該当する情報が見つかりませんでした」と答える。\n"
-            "- 日本語で簡潔に応答してください。\n"
-            f"- 現在時刻: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-            f"{prompt_patches}"
-            f"{live_context}"
-        ),
-    }
+    # ★2026-07-20 agentic 化 (個人エージェント評価 #1): persona+owner-memory 常時注入 +
+    # bounded tool-loop (reminder/task/memory 書込 + 追加検索)。ロジックは services/agent_core.py
+    # (§1.12b)。既存 prefetch は round-0 context として維持 = 単純質問のレイテンシ不変。
+    from services import agent_core as _ac, owner_memory as _om
+    system = {"role": "system", "content": _ac.build_system_prompt(
+        live_context, prompt_patches, datetime.now().strftime("%Y-%m-%d %H:%M"))}
 
     # モデル選択ロジック
     model = select_model(user_message)
 
     messages_payload = [system] + messages + [{"role": "user", "content": user_message}]
 
+    _bi: BrainIndex = app.state.brain_index
+    executors = _ac.merge_executors({
+        "search_brain": lambda a: _bi.build_context(str(a.get("query", "")), max_chars=2000),
+        "search_drive": lambda a: asyncio.to_thread(_fetch_drive_context, str(a.get("query", "")), 10, True),
+        "get_calendar": lambda a: asyncio.to_thread(_fetch_calendar_context, max(1, min(int(a.get("days", 3)), 30))),
+        "get_mail": lambda a: asyncio.to_thread(_fetch_mail_context, max(1, min(int(a.get("days", 1)), 7)), 15),
+    })
+
     try:
-        resp = await http.post(
-            f"{LITELLM_URL}/v1/chat/completions",
-            headers={"Authorization": f"Bearer {LITELLM_KEY}"},
-            json={
-                "model": model,
-                "messages": messages_payload,
-                "max_tokens": 4000,
-            },
+        reply = await _ac.run_tool_loop(
+            http, LITELLM_URL, LITELLM_KEY, model, messages_payload, executors,
         )
-        resp.raise_for_status()
-        data = resp.json()
-        reply = data["choices"][0]["message"]["content"]
     except Exception as e:
         logger.error(f"LLM error: {e}")
         reply = f"エラーが発生しました: {str(e)[:200]}"
@@ -1532,6 +1564,9 @@ async def run_agent(
     await r.rpush(history_key, json.dumps({"role": "assistant", "content": reply}))
     await r.ltrim(history_key, -40, -1)  # 直近20ターン分を保持
     await r.expire(history_key, 86400 * 7)  # 7日で期限切れ
+
+    # ★恒久 owner-memory 抽出 (fire-and-forget = レイテンシ非影響、task 参照保持は spawn 側)
+    _om.spawn_post_turn(http, user_message, reply, LITELLM_URL, LITELLM_KEY)
 
     return reply
 
@@ -1831,7 +1866,7 @@ async def webhook(request: Request):
             # /memo {content} 形式に変換 (= prefix 部分も保持して content にする)
             user_message = "/memo " + _msg_stripped
 
-        if user_message.startswith(("/brain", "/teach", "/memo", "/clone", "/lint", "/dedup", "/graph", "/wiki", "/forward", "/align", "/line-", "/audit", "/research", "/personal", "/reflux", "/bridge", "/diary")):
+        if user_message.startswith(("/brain", "/teach", "/memo", "/clone", "/lint", "/dedup", "/graph", "/wiki", "/forward", "/align", "/line-", "/audit", "/research", "/personal", "/reflux", "/bridge", "/diary", "/help", "/drive")):
             # ★2026-05-23 LEE §3.2: admin gate (fail-closed)
             if not is_admin(user_id):
                 await reply_message(request.app.state.http, reply_token, reject_message())
@@ -1899,21 +1934,10 @@ async def webhook(request: Request):
                     pass
                 continue
 
-        # ─── モード選択: システムから質問待ちでない通常入力 → 目的選択 Quick Reply ───
-        r_conn = request.app.state.redis
-        pending_system_q = await _has_pending_system_question(r_conn, user_id)
-        if not pending_system_q:
-            # 入力を一時保存（15分） → 次の Quick Reply タップで取り出す
-            await _store_pending_input(r_conn, user_id, user_message)
-            preview = user_message[:80] + ("…" if len(user_message) > 80 else "")
-            await reply_message(
-                request.app.state.http, reply_token,
-                f"「{preview}」\n\n目的を選んでください:",
-                quick_reply=PURPOSE_QUICK_REPLY,
-            )
-            continue
-
-        # ─── エージェント実行（質問待ち状態でフォールバック） ───
+        # ─── エージェント実行 (★2026-07-20 Umiyama AI Agent 正式化: 毎メッセージの
+        # 目的選択 Quick Reply を廃止しデフォルト=会話に。海山「無用な通知等は極力なくす」。
+        # Wiki 即時取込は /teach //memo、システム修正は /claude の明示コマンドへ。
+        # 背景 ingest (_safe_ingest) は全会話で従来どおり走る = ノート投げ込みも wiki に届く) ───
         reply = await run_agent(
             request.app,
             request.app.state.http,
@@ -1924,8 +1948,11 @@ async def webhook(request: Request):
         await reply_message(request.app.state.http, reply_token, reply)
         n_text_events_processed += 1
 
-        # ─── バックグラウンド学習 ───
+        # ─── バックグラウンド学習 + 不満足応答の自動改善 (旧 purpose=chat と同等) ───
         asyncio.create_task(_safe_ingest(request.app, user_id, user_message, reply))
+        asyncio.create_task(
+            _auto_improve_if_unsatisfactory(request.app, "line_chat", user_id, user_message, reply)
+        )
 
     # ★2026-05-24 海山指示 silent skip detection: message event 受信したが
     # text event を 1 件も応答処理しなかった場合 → silent skip 疑い event log。
@@ -2996,6 +3023,20 @@ async def _handle_lineworks_message(app, parsed: dict) -> None:
             except Exception as e:
                 logger.warning(f"LINE Works welcome 送信失敗: {e}")
 
+        # ★2026-08-10 (再ローンチ総点検): 「利用開始」ボタンのテキストを LLM に流さない。
+        #   流すと bot が毎回即興の自己紹介を返し、初回画面が
+        #   「静的 welcome + 例文ボタン + 即興挨拶」の 3 連投になってボタンが押し流される。
+        #   しかも即興側は過去に「資料作成や分析の代行はやらない」等、業務エージェント転換
+        #   (M4) と正反対の宣言をした実績がある。決定論で受け止めて終わる。
+        if (text or "").strip() in ("利用開始", "利用を開始する", "開始"):
+            if prior:  # 既存ユーザが押し直した場合だけ、例文ボタンを再掲する
+                try:
+                    from services.lineworks_onboarding import send_welcome
+                    await send_welcome(http, user_id)
+                except Exception as e:
+                    logger.warning(f"利用開始 再welcome 失敗: {e}")
+            return  # 初回は welcome 送信済み = 追加応答しない
+
         # ユーザメッセージを履歴に追加
         clone_history.append(user_id, "user", text)
 
@@ -3941,7 +3982,8 @@ async def _handle_purpose_postback(app, user_id: str, reply_token: str, pb_data:
     if not pending:
         await reply_message(
             app.state.http, reply_token,
-            "⏱ 入力が見つかりません（15分で期限切れ）。もう一度メッセージを送ってください。"
+            "⏱ このボタンは旧メニューのものです。今はそのまま送れば会話に、"
+            "/teach <内容> で Wiki 保存、/claude <指示> でシステム修正になります。"
         )
         return
 
@@ -4381,6 +4423,7 @@ def _voice_align_caller_trusted(msg: dict, payload: dict) -> bool:
 
 async def _build_voice_align_assistant_config(
     first_message: str = None, server_secret: str = None, trusted: bool = True,
+    browser_delivered: bool = False,
 ) -> dict:
     """Vapi assistant 設定を組み立てる (phone + web 共通)。
 
@@ -4417,30 +4460,35 @@ async def _build_voice_align_assistant_config(
         from brain_wiki import WIKI_DIR as _WK
         idir = _WK / "interview"
         past_bits = []
-        if idir.exists():
-            for f in sorted(idir.glob("*.md")):
-                try:
-                    b = f.read_text(encoding="utf-8")
-                except Exception:
-                    continue
-                if b.startswith("---"):
-                    e = b.find("\n---", 3)
-                    if e > 0:
-                        b = b[e + 4:]
-                b = b.strip()
-                if b:
-                    # ★2026-07-04 fix: 先頭500字 = append-only file の最古 insight で永久固定
-                    # だった (13回話しても interviewer が見る本人像は5月のまま = 同じ角度の
-                    # 質問が再来 → 失速の一因)。末尾500字 = 最新 insight に変更。
-                    past_bits.append(f"[{f.stem}] {b[-500:]}")
+        # ★2026-08-03 ブラウザ配送時は最深カテゴリを落とす (判定は voice_visibility、§1.12b)
+        from brain_wiki_helpers.voice_visibility import interview_files_for_voice
+        for f in interview_files_for_voice(idir, browser_delivered=browser_delivered):
+            try:
+                b = f.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            if b.startswith("---"):
+                e = b.find("\n---", 3)
+                if e > 0:
+                    b = b[e + 4:]
+            b = b.strip()
+            if b:
+                # ★2026-07-04 fix: 先頭500字 = append-only file の最古 insight で永久固定
+                # だった (13回話しても interviewer が見る本人像は5月のまま = 同じ角度の
+                # 質問が再来 → 失速の一因)。末尾500字 = 最新 insight に変更。
+                past_bits.append(f"[{f.stem}] {b[-500:]}")
         thin = [r["label"] for r in ai.coverage_report()[:3]]
         # ★2026-07-04 継続性: 直近セッションの session_summary を注入 (レビュー未了でも効かせる)。
         # 従来 EXTRACT_PROMPT が生成する session_summary はどこにも配線されておらず「前回の
         # 続き」が壊れていた (失速の構造要因)。
+        # ★2026-08-03: 要約は次元フィルタが効かない (直近が family/shadow 回なら深層がそのまま
+        # 出る) → ブラウザ配送時のみ丸ごと落とす (判定は voice_visibility、§1.12b)
+        from brain_wiki_helpers.voice_visibility import redact_summaries_for_browser
         try:
             summaries = ai.recent_session_summaries(3)
         except Exception:
             summaries = []
+        summaries = redact_summaries_for_browser(summaries, browser_delivered=browser_delivered)
         cont = (
             "\n\n【前回までの流れ (この続きから自然に)】\n"
             + "\n".join(f"- {s}" for s in summaries)
@@ -4471,6 +4519,11 @@ async def _build_voice_align_assistant_config(
                 max_items=int(os.getenv("VOICE_ALIGN_TOPIC_MAX", "6")),
                 days=int(os.getenv("VOICE_ALIGN_TOPIC_DAYS", "21")),
             )
+            # ★2026-08-03 §1.15 DA 迂回2: 話のタネは personal/ を意図的に含む (§1.17 4系統目)
+            # が、その抜粋も **ブラウザ配送 config には平文で載る**。interview を絞っても
+            # personal (投資 PJ・第三者の発話込み) が出るのは一貫しないので web では落とす。
+            if browser_delivered:
+                topics = [t for t in topics if t.get("dir") != "personal"]
             wiki_topics_block = ai.format_wiki_topics(topics)
             # ★2026-07-04 cross-check DA: 冒頭で「こちらから読み上げる」題名は
             # hobbies / personal PJ に限定。meetings / knowledge / decisions の題名
@@ -5311,8 +5364,10 @@ async def voice_align_web_config(token: str = ""):
     # (時間帯 × 前回からの間隔 × wiki 話のタネ) に統一。server_secret の経路別分離は維持。
     # ★2026-07-12 音声 Phase 1: brain_search tool も付く (secret 非包含 = tool-calls は
     # assistant.server 経由で web secret が届く。ブラウザ露出は従来どおり server_secret のみ)。
+    # ★2026-08-03: この戻り値はブラウザに平文で渡る → 最深カテゴリを除外 (voice_visibility)
     return await _build_voice_align_assistant_config(
         server_secret=(web_secret or os.getenv("VAPI_SECRET", "")),
+        browser_delivered=True,
     )
 
 
@@ -5759,10 +5814,10 @@ _CLONE_VOICE_HTML = """<!DOCTYPE html>
 <h1>うみやま 声 試聴</h1>
 <p class="sub">テキスト → 海山さんの声 (Pro Voice Clone) で読み上げ。社員配信は別 phase、まず品質判断用。</p>
 
-<textarea id="text" placeholder="ここにテキストを入力">サンプル駅前店の今日の売上は12,345円、客数は1人だね。少し小さくまとまってる感じ。明日の動きを見て、必要なら声かけるよ。</textarea>
+<textarea id="text" placeholder="ここにテキストを入力">武蔵小山パルムの今日の売上は19,727円、客数は1人だね。少し小さくまとまってる感じ。明日の動きを見て、必要なら声かけるよ。</textarea>
 
 <div class="row">
-  <button class="preset" data-text="サンプル駅前店の今日の売上は12,345円、客数は1人だね。少し小さくまとまってる感じ。明日の動きを見て、必要なら声かけるよ。">業績コメント</button>
+  <button class="preset" data-text="武蔵小山パルムの今日の売上は19,727円、客数は1人だね。少し小さくまとまってる感じ。明日の動きを見て、必要なら声かけるよ。">業績コメント</button>
   <button class="preset" data-text="お疲れさま。今日もありがとう。明日も頼りにしてる。">短い激励</button>
   <button class="preset" data-text="OWNDAYS の Vision は「OWNDAYS に関わる全ての人を豊かにする」。これが原点で、ここから全部派生してる。">VMV 説明</button>
   <button class="preset" data-text="Yesterday we closed at three point two billion yen, which is roughly a five percent increase year on year. Strong performance in Japan, slightly soft in Southeast Asia.">English</button>
@@ -6669,15 +6724,17 @@ async def _initial_reindex(app):
         idx: BrainIndex = app.state.brain_index
         stats = idx.get_stats()
         if stats["total_chunks"] > 0:
-            logger.info(f"Vector index already has {stats['total_chunks']} chunks — skipping reindex")
+            # ★2026-08-10: 全 skip をやめ、欠落分だけ突合補充 (詳細は
+            #   BrainIndex.reconcile_missing_wiki の docstring。§1.12b: 実体は helpers 側)
+            from brain_wiki import WIKI_DIR as _WD
+            await idx.reconcile_missing_wiki(_WD)
             return
 
         from brain_wiki import WIKI_DIR, RAW_DIR
         logger.info("Initial vector index build starting...")
-        await idx.reindex_all_wiki(WIKI_DIR)
-        await idx.reindex_all_raw(RAW_DIR)
-        stats = idx.get_stats()
-        logger.info(f"Initial reindex complete: {stats['total_chunks']} chunks")
+        summary = await idx.rebuild_all(WIKI_DIR, RAW_DIR)  # ★2026-08-14: 突合込み (§1.12b)
+        # runbook の検証手順がこの行を grep するので key=value 形式で出す (dict repr は避ける)
+        logger.info("Initial reindex complete: " + " ".join(f"{k}={v}" for k, v in summary.items()))
     except Exception as e:
         logger.warning(f"Initial reindex error: {e}")
 
@@ -6769,6 +6826,16 @@ async def _watch_import_dir(app):
     IMPORT_DIR.mkdir(parents=True, exist_ok=True)
     processed_dir = IMPORT_DIR / "processed"
     processed_dir.mkdir(exist_ok=True)
+    # ★2026-08-03: 重複 compile 抑止の state (本文 fingerprint) と計測ログ
+    IMPORT_DEDUP_STATE = Path("/app/data/brain/.import_dedup_state.json")
+
+    def _log_import_event(kind: str, filename: str) -> None:
+        """skip/compile の件数を bot_events に残す (skip 率 100% = 取りこぼしの兆候を検知するため)。"""
+        try:
+            from scripts.bot_events import log_bot_event
+            log_bot_event("import", kind, file=filename[:80])
+        except Exception:
+            pass
 
     # スクレイパーが既に wiki を決定論的に書いているため、
     # ingest_note 経由の LLM compile に流すと wiki が破壊される (LLMが要約・上書きする)。
@@ -6942,7 +7009,6 @@ async def _watch_import_dir(app):
                                     LITELLM_URL,
                                     LITELLM_KEY,
                                     raw_filename=raw_p.name,
-                                    model="smart",
                                 )
                                 if res.get("error"):
                                     logger.warning(
@@ -6995,7 +7061,6 @@ async def _watch_import_dir(app):
                                     user_id="system_import",
                                     content=content,
                                     title=f"{src_file.stem} (extract_failed)",
-                                    model="smart",
                                 )
                             except Exception as e:
                                 logger.warning(f"ingest_note (extract_failed marker) failed: {e}")
@@ -7008,7 +7073,6 @@ async def _watch_import_dir(app):
                                     user_id="system_import",
                                     content=content,
                                     title=src_file.stem,
-                                    model="smart",
                                 )
                             except Exception as e:
                                 logger.warning(f"ingest_note failed for {src_file.name}: {e}")
@@ -7032,12 +7096,26 @@ async def _watch_import_dir(app):
                         try:
                             content = src_file.read_text(encoding="utf-8", errors="replace")
                             title = src_file.stem
-                            await app.state.brain.ingest_note(
-                                user_id="system_import",
-                                content=content,
-                                title=title,
-                                model="smart",
-                            )
+                            # ★2026-08-03 コスト実測: LINE Works は 2h おきに全ルームの全文を
+                            # 書き出すため、新規発言が無いルームも毎回 LLM compile されていた
+                            # (実測 3 回中 1-2 回が同一本文 = 支出の約4割)。本文 hash で skip。
+                            from brain_wiki_helpers import import_dedup as _dd
+                            _dd_state = _dd.load_state(IMPORT_DEDUP_STATE)
+                            if _dd.is_duplicate(_dd_state, src_file.name, content):
+                                logger.info(
+                                    f"重複 skip (本文が前回と同一): {src_file.name} "
+                                    f"— compile せず processed/ へ")
+                                _log_import_event("dedup_skip", src_file.name)
+                            else:
+                                await app.state.brain.ingest_note(
+                                    user_id="system_import",
+                                    content=content,
+                                    title=title,
+                                )
+                                _dd.save_state(
+                                    IMPORT_DEDUP_STATE,
+                                    _dd.remember(_dd_state, src_file.name, content))
+                                _log_import_event("compiled", src_file.name)
                         except Exception as e:
                             logger.warning(f"ingest_note fallback failed ({src_file.name}): {e}")
                     src_file.rename(processed_dir / src_file.name)
@@ -7423,8 +7501,13 @@ async def ready(request: Request):
 # ─── Brain API（外部クライアント用）───
 
 @app.get("/api/brain/knowledge")
-async def api_brain_knowledge(request: Request, _: str = Depends(require_api_key)):
-    """Brain Wiki + カレンダー + メールの最新ナレッジを返す"""
+async def api_brain_knowledge(request: Request, _: str = Depends(require_admin_key)):
+    """Brain Wiki + カレンダー + メールの最新ナレッジを返す。
+
+    ★2026-07-14 世界基準評価 #1 cross-check: mail (Gmail 直近10件の差出人+件名) +
+    calendar (2日分) を返す = /api/brain/dashboard と同クラスの CEO 個人データ。
+    弱い ?token= fallback で到達できた穴を require_admin_key で封鎖 (chat/drive/dashboard と一貫)。
+    """
     wiki_content = ""
     wiki_dir = Path("/app/data/brain/wiki")
     if wiki_dir.exists():
@@ -7482,8 +7565,9 @@ async def api_brain_search(request: Request, _: str = Depends(require_api_key)):
 
 
 @app.get("/api/brain/drive")
-async def api_brain_drive(request: Request, _: str = Depends(require_api_key)):
-    """Google Driveファイル検索+内容取得"""
+async def api_brain_drive(request: Request, _: str = Depends(require_admin_key)):
+    """Google Driveファイル検索+内容取得。★2026-07-14: CEO 個人 Drive に到達するため
+    admin-tier 必須 (弱い ?token= fallback 不可、chat/#37 と一貫)。"""
     query = request.query_params.get("q", "")
     if not query:
         raise HTTPException(status_code=400, detail="q parameter required")
@@ -7501,8 +7585,11 @@ async def chat_page():
 
 
 @app.post("/api/brain/chat")
-async def api_brain_chat(request: Request, _: str = Depends(require_api_key)):
-    """Web Chat API — LINE Botと同じrun_agentを使用"""
+async def api_brain_chat(request: Request, _: str = Depends(require_admin_key)):
+    """Web Chat API — LINE Botと同じrun_agentを使用。
+
+    ★2026-07-14: run_agent は interview/ + Gmail + Drive に到達するため admin-tier 必須
+    (require_admin_key)。弱い VOICE_ALIGN_TOKEN fallback では叩けない (LINE 経路 #37 と一貫)。"""
     try:
         body = await request.json()
     except Exception:
@@ -7540,8 +7627,9 @@ async def dashboard_page():
 
 
 @app.get("/api/brain/dashboard")
-async def api_brain_dashboard(request: Request, _: str = Depends(require_api_key)):
-    """ダッシュボード用: カレンダー/メール/Wiki/アクティビティを一括取得"""
+async def api_brain_dashboard(request: Request, _: str = Depends(require_admin_key)):
+    """ダッシュボード用: カレンダー/メール/Wiki/アクティビティを一括取得。
+    ★2026-07-14: CEO 個人 Gmail/カレンダーに到達するため admin-tier 必須 (弱 token 不可)。"""
     from datetime import timedelta
 
     # --- Calendar + Emails を並列取得 ---

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """meeting_autojoin.py — umiyama の web 会議へ Recall bot を自動参加させ議事録→wiki
 
-★2026-07-03 海山指示「workspace-owner@example.co.jp が参加する web mtg に umiyama-ai を自動参加させて
+★2026-07-03 海山指示「ceo@owndays.co.jp が参加する web mtg に umiyama-ai を自動参加させて
 議事録を取って、Plaud と同様に wiki に追加するようにしたい」。
 
 アーキテクチャ (polling-first):
-  cron (10分毎 7-22時) → ①Google Calendar (workspace-owner@example.co.jp、共有済) から先 36h の
+  cron (10分毎 7-22時) → ①Google Calendar (ceo@owndays.co.jp、共有済) から先 36h の
   予定を取得 → ②参加判定 (会議URL有 + denylist/社外/辞退/終日 除外) → ③Recall.ai bot を
   join_at 付きで予約 (state で冪等、時刻変更は作り直し、キャンセルは bot 削除) →
   ④終了した bot の transcript を poll で取得 → ⑤既存 /api/meeting/ingest へ POST
@@ -21,7 +21,7 @@
 
 env:
   MEETING_AUTOJOIN_ENABLED=1        # opt-out gate
-  MEETING_TARGET_CALENDAR=workspace-owner@example.co.jp
+  MEETING_TARGET_CALENDAR=ceo@owndays.co.jp
   RECALL_API_KEY / RECALL_API_BASE (ap-northeast-1 実証済)
   MEETING_AUTOJOIN_ALLOW_EXTERNAL=0 # 1 で社外同席会議も参加
   MEETING_DENYLIST_EXTRA=           # 追加 denylist regex
@@ -54,7 +54,7 @@ JST = timezone(timedelta(hours=9))
 STATE_FILE = ROOT / "data" / "brain" / ".meeting_autojoin_state.json"
 
 RECALL_BASE = os.getenv("RECALL_API_BASE", "https://ap-northeast-1.recall.ai").rstrip("/")
-TARGET_CALENDAR = os.getenv("MEETING_TARGET_CALENDAR", "workspace-owner@example.co.jp")
+TARGET_CALENDAR = os.getenv("MEETING_TARGET_CALENDAR", "ceo@owndays.co.jp")
 BOT_NAME = os.getenv("MEETING_BOT_NAME", "Take Umiyama AI")  # ★2026-07-14 海山指示で改名
 # 「社内」ドメイン (dry-run 実測: owndays.com = グローバル側も社員が使う)。
 # 親会社 lenskart.com は「社外パートナー」境界の判断が要るため default 非許可
@@ -211,11 +211,31 @@ def build_transcript_text(data) -> tuple[str, list[str]]:
     return "\n".join(lines), speakers
 
 
+# sub_code → 海山が読んで**次に何をすればいいか**分かる説明 (★2026-08-03)
+_FATAL_HINT = {
+    "timeout_exceeded_waiting_room":
+        "待機室に入ったまま誰も入室許可せず終了。Meet の許可 UI は "
+        "カレンダーの主催者/共同主催者にしか出ないため、主催者が実出席者でない定例だと"
+        "誰も気付けない。→ 共同主催者を事前指名 (カレンダーUI) が最も手軽",
+    "bot_kicked_from_waiting_room": "待機室から削除された (参加者が拒否)",
+    "google_meet_bot_blocked":
+        "参加リクエスト自体が拒否された。会議の「リンクを知っている人は参加をリクエストできる」"
+        "が外れている可能性",
+    "timeout_exceeded_everyone_left": "会議に誰も来なかった / 全員退出",
+}
+
+
 def _notify_fatal(entry: dict, code: str) -> None:
-    """★DA R8: 議事録が取れなかった会議を silent にしない (「あるはず」期待とのズレ防止)。"""
+    """★DA R8: 議事録が取れなかった会議を silent にしない (「あるはず」期待とのズレ防止)。
+    ★2026-08-03: sub_code だけだと何をすべきか分からないため、対処のヒントを添える
+    (実測で 8/12 が待機室 timeout = 同じ対処で一括して直る種類の失敗だった)。"""
     try:
-        from clone_improve_lib import line_push
-        line_push(f"⚠️ 議事録取れず: {entry.get('title', '?')} ({code})")
+        from clone_improve_lib import line_push, line_push_digest
+        hint = _FATAL_HINT.get(code)
+        msg = f"⚠️ 議事録取れず: {entry.get('title', '?')} ({code})"
+        if hint:
+            msg += f"\n→ {hint}"
+        line_push_digest(msg, "会議")
     except Exception:
         pass
 
@@ -257,7 +277,26 @@ def create_bot(http: httpx.Client, meeting_url: str, join_at: datetime,
         "bot_name": BOT_NAME,
         "join_at": join_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
         "metadata": {"title": title[:100], "source": "meeting_autojoin"},
+        # ★2026-08-03: 待機室の滞留時間を既定 1200s → 300s に短縮。
+        #   実測 (Recall sub_code) で失敗 12 件中 **8 件が timeout_exceeded_waiting_room** =
+        #   「待機室に入ったまま誰も許可せず 20 分待って退出」だった。Google Meet の Host
+        #   Controls 下では待機室の許可 UI が **カレンダー organizer と共同主催者にしか出ない**
+        #   ため、organizer が実出席者でない定例では誰も気付けない (公式トラブルシュート記載)。
+        #   短縮しても入室できるようにはならないが、入れない会議で 20 分居座る無駄を削り、
+        #   失敗の検知も早くなる。env で調整可。
+        "automatic_leave": {
+            "waiting_room_timeout": int(os.getenv("RECALL_WAITING_ROOM_TIMEOUT", "300")),
+        },
     }
+    # ★Signed-In Bot (待機室スキップの唯一の公式解): Google Login Group を用意した場合のみ有効。
+    #   未設定なら従来どおり匿名 bot で動く (後方互換)。有効化には bot 専用の別ドメイン
+    #   Workspace + SAML/SSO 設定が必要 = 海山/IT の決裁事項のため、env 注入で切替可能にしておく。
+    _login_group = os.getenv("RECALL_GOOGLE_LOGIN_GROUP_ID", "").strip()
+    if _login_group:
+        base_payload["google_meet"] = {
+            "login_required": True,
+            "google_login_group_id": _login_group,
+        }
     new_style = dict(base_payload)
     new_style["recording_config"] = {
         # ★fact-checker FLAG1: caption 言語は default 英語で auto-detect されない。
@@ -366,6 +405,35 @@ def bot_status(bot: dict) -> str:
     return (bot.get("status") or {}).get("code", "") if isinstance(bot.get("status"), dict) else str(bot.get("status") or "")
 
 
+def bot_failure_reason(bot: dict) -> str:
+    """★2026-08-03: 失敗の**真因**を Recall の sub_code から取る。
+
+    実測 (失敗 12 件) の内訳は
+      timeout_exceeded_waiting_room 8 / bot_kicked_from_call 2 /
+      timeout_exceeded_everyone_left 1 / bot_received_leave_call 1
+    で、**大半が「待機室に入ったまま誰も許可せず退出」**だった。従来は最終 code が `done` に
+    なるため「正常終了したのに議事録が無い」ようにしか見えず、22 件中 0 件という結果の理由が
+    表に出なかった。sub_code を拾えば原因が一意に決まる (Google Meet の Host Controls 下では
+    待機室の許可 UI が organizer と共同主催者にしか出ないため、organizer が実出席者でない
+    定例では誰も気付けない = 公式トラブルシュート記載の典型例)。
+    戻り値は sub_code (無ければ空文字)。
+    """
+    for s in reversed(bot.get("status_changes") or []):
+        sub = (s or {}).get("sub_code")
+        if sub:
+            return str(sub)
+    return ""
+
+
+# 録音が取れない = 議事録にならない sub_code (通知して原因を可視化する)
+NO_RECORDING_SUBCODES = {
+    "timeout_exceeded_waiting_room",   # 待機室で放置 → 入室できず
+    "bot_kicked_from_waiting_room",    # 待機室から removed
+    "google_meet_bot_blocked",         # 参加リクエスト自体が拒否される設定
+    "timeout_exceeded_everyone_left",  # 誰も来なかった / 全員退出
+}
+
+
 def _send_daily_digest(events: list, now: datetime, allow_external: bool,
                        extra_deny: str) -> None:
     """当日分の join/skip 予定一覧を LINE push (★DA R8 pre-flight review)。"""
@@ -383,14 +451,14 @@ def _send_daily_digest(events: list, now: datetime, allow_external: bool,
     if not joins and not skips:
         return
     try:
-        from clone_improve_lib import line_push
+        from clone_improve_lib import line_push, line_push_digest
         msg = ["🤖 本日の議事録 bot 予定 (参加は入室許可が要ります)"]
         msg += joins or ["(参加予定なし)"]
         if skips:
             msg.append("--- skip ---")
             msg += skips[:10]
         msg.append("※参加を止める: 予定 title に [no-ai] / 参加させる: [ai-ok]")
-        line_push("\n".join(msg)[:3800])
+        line_push("\n".join(msg)[:3800])  # pre-flight = [no-ai] 拒否権 window、即時必須 (cross-check 3体一致で digest 化を差し戻し)
     except Exception:
         pass
 
@@ -558,6 +626,17 @@ def run_cycle(dry_run: bool = False, horizon_hours: int = 36) -> dict:
                 summary["errors"] += 1
                 continue
             code = bot_status(bot)
+            # ★2026-08-03: 「done だが録音ゼロ」を sub_code で真因つきに確定させる。
+            #   これが無いと 22 件中 0 件でも「正常終了」に見え、原因が表に出ない。
+            _sub = bot_failure_reason(bot)
+            if _sub in NO_RECORDING_SUBCODES and not (bot.get("recordings") or []):
+                logger.warning(f"bot 失敗 ({_sub}): {entry.get('title')}")
+                entry["done"] = True
+                entry["fatal"] = _sub
+                summary.setdefault("no_recording", {})
+                summary["no_recording"][_sub] = summary["no_recording"].get(_sub, 0) + 1
+                _notify_fatal(entry, _sub)
+                continue
             if code in ("fatal", "call_ended_without_recording"):
                 logger.warning(f"bot 失敗 ({code}): {entry.get('title')}")
                 entry["done"] = True
@@ -620,7 +699,7 @@ def run_cycle(dry_run: bool = False, horizon_hours: int = 36) -> dict:
                 if delete_bot_media(http, entry["bot_id"]):
                     entry["media_deleted"] = True
                 try:
-                    from clone_improve_lib import line_push
+                    from clone_improve_lib import line_push, line_push_digest
                     line_push(f"📝 議事録できた: {entry.get('title')}\n→ {wiki_file}")
                 except Exception:
                     pass

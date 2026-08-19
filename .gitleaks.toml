@@ -44,9 +44,9 @@ keywords = ["sk-litellm-"]
 
 [[rules]]
 id = "owndays-mobile-password"
-description = "社内システム password (会社固有 prefix + 数字) を hardcode してはいけない (.env 経由のみ)"
-regex = '''(?i)(mobilepass|netmobile_pass)\s*[:=]\s*[A-Za-z0-9]{6,}'''
-keywords = ["mobilepass", "netmobile"]
+description = "OWNDAYS Net Mobile password (Owndays + 数字) を hardcode してはいけない (.env 経由のみ)"
+regex = '''Owndays[0-9]{3,}'''
+keywords = ["Owndays"]
 
 [[rules]]
 id = "stapa-login-hardcode"
@@ -62,15 +62,41 @@ description = "LINE Works scraper の --login-pw を平文 hardcode してはい
 regex = '''--login-pw\s+["'][^"'$][^"']*["']'''
 keywords = ["login-pw"]
 
+[[rules]]
+id = "masked-credential-fragment"
+description = "資格情報の **部分マスク** を書かない (★2026-08-18 実害: 作業メモの部分マスクが公開 repo に1ヶ月出た)。伏せたつもりでも長さ・先頭末尾・生成の癖が残り、gitleaks の『本物の秘密』検出は素通りする。値は1文字も書かず、env 変数名だけで指すこと。"
+regex = '''[A-Za-z0-9]{1,4}[*＊]{2,}[A-Za-z0-9]{1,4}'''
+keywords = ["*"]
+
+[[rules]]
+id = "password-label-with-value"
+description = "パスワードをラベル付きで平文表記しない (docs/コメント/コミットメッセージ含む)"
+# ★gitleaks は Go の RE2 = 否定先読み (?!) を使えない。placeholder の除外は
+#   下の [rules.allowlist] で行う (inline lookahead にすると config が panic する)。
+regex = '''(?i)(パスワード|password|passwd|pwd|暗証番号)\s*(は|:|：|=|＝)\s*[^\s。、,」）)]{4,}'''
+keywords = ["パスワード", "password", "passwd", "pwd", "暗証番号"]
+
+[rules.allowlist]
+description = "placeholder / env 参照 / URL は値ではない"
+regexes = [
+    '''(?i)(パスワード|password|passwd|pwd|暗証番号)\s*(は|:|：|=|＝)\s*(https?://|<|\$|\{|your-|xxx|\.\.\.|os\.getenv|変[えわ])''',
+    '''(?i)password["\047]?\s*[:=]\s*["\047]?(os\.environ|process\.env)''',
+]
+
 [allowlist]
+# ★2026-08-18: 旧版は paths に ^docs/.*\.md$ があり **docs 配下を丸ごと除外**していた。
+# そのため作業メモの部分マスクが検出されず公開 repo へ出た。
+# placeholder の許容は下の regexes だけで足り、path 単位の全除外は穴になるので撤去した。
 description = "test fixtures + 例示 placeholder は許容 (.env.example の your-password / your-key-here 等)"
 paths = [
     '''^\.env\.example$''',
-    '''^docs/.*\.md$''',  # docs は <REDACTED> / placeholder 形式で書く前提
+    # ★検出ルール自身のテスト。パターンを含まないと検出を検証できない。
+    # docs 全除外のような広い穴にしないため **この 1 ファイルに限定** する。
+    '''^tests/test_privacy_gate_injection\.py$''',
 ]
 regexes = [
     '''cohere_<[A-Z_]+>''',           # cohere_<REDACTED_*> placeholder
-    '''cohere_[A-Za-z0-9]{10}\.{3}''',  # 過去 leak token の sanitize 痕跡 (汎用形)
+    '''cohere_AyzAAK0Gl7\.{3}''',     # 過去 leak token の sanitize 痕跡
     '''sk_[a-z]{4}\.{3}''',           # sk_xxxx... display 例
     '''your-password''',              # .env.example の OWNDAYS/STAPA placeholder
     '''sk-litellm-your-key-here''',   # .env.example の LiteLLM placeholder

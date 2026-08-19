@@ -217,12 +217,12 @@ def test_persona_digest_cache_invalidates_on_mtime(tmp_path):
 def test_build_system_prompt_includes_layers(tmp_path):
     _write_wiki(tmp_path, "identity.md", "価値観: 本質主義")
     from services import owner_memory as om
-    om.add_entry("facts", "定宿はサンプルホテル")
+    om.add_entry("facts", "定宿はオークラ")
     sp = ac.build_system_prompt("\n\n## Wiki\n中身", "\nPATCH", "2026-07-20 12:00")
     # 層の存在 (★2026-07-20 正式名称化)
     assert "Umiyama AI Agent" in sp
     assert "人格ダイジェスト" in sp and "本質主義" in sp
-    assert "恒久メモリー" in sp and "サンプルホテル" in sp
+    assert "恒久メモリー" in sp and "オークラ" in sp
     # 既存の実事故由来ルールを維持
     assert "AIなのでファイルを読めません" in sp
     # 捏造抑止 + tool 指針
@@ -238,3 +238,22 @@ def test_build_system_prompt_empty_layers_omitted():
     assert "人格ダイジェスト" not in sp
     assert "恒久メモリー" not in sp
     assert "重要ルール" in sp
+
+
+# ─── main.py wiring pin (source-level) ───
+
+def test_run_agent_wired_to_agent_core():
+    src = (_ROOT / "main.py").read_text(encoding="utf-8")
+    i = src.index("async def run_agent")
+    body = src[i:i + 8000]
+    assert "_ac.build_system_prompt" in body, "run_agent が agent_core の system prompt を使っていない"
+    assert "_ac.run_tool_loop" in body, "run_agent が tool_loop 化されていない"
+    assert "_om.spawn_post_turn" in body, "run_agent 後段の owner-memory 抽出が外れている"
+    assert "merge_executors" in body
+
+
+def test_memory_command_wired_in_brain_commands():
+    src = (_ROOT / "brain_commands.py").read_text(encoding="utf-8")
+    assert "handle_memory_command" in src
+    # /memo (末尾スペース) より前に /memory 判定があること (prefix 衝突回避)
+    assert src.index('startswith("/memory")') < src.index('startswith("/memo ")')

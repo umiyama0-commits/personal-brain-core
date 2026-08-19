@@ -2106,7 +2106,7 @@ def render_voice_align_page(token: str, flash: Optional[str] = None) -> str:
     if not pending:
         parts.append(
             '<div class="empty">📭 pending な蒸留案なし — '
-            '電話 +1 XXX XXX XXXX で雑談、または '
+            '電話 +1 572 726 9551 で雑談、または '
             '<code>/voice-align?token=...</code> (web SDK) で会話 → '
             '数分後にここに表示される</div>'
         )

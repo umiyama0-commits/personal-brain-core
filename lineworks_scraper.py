@@ -447,7 +447,7 @@ async def scrape_lineworks(
                 logger.info(f"自動ログイン: {login_id}")
                 # ★2026-06-08 fix: LINE Works login の ID 欄は「@owndays」ドメインが
                 # 右側に固定表示され、**@ の前 (= username 部) のみ**を入力する仕様。
-                # 旧実装は full の「your-account@your-lw-domain」を入れていたため
+                # 旧実装は full の「ceo@owndays.co.jp」を入れていたため
                 # 「@の前の部分のIDのみ入力してください」エラーで login 失敗していた。
                 # @ があれば前半のみ、無ければそのまま使う。
                 username_only = login_id.split("@")[0] if "@" in login_id else login_id
@@ -899,11 +899,80 @@ async def scrape_lineworks(
         return all_exports
 
 
+ACC_DIR = Path("/Users/brain/brain-agent/data/brain/.lineworks_acc")
+ACC_RETAIN_DAYS = 10
+
+
+def _msg_key(m: dict) -> str:
+    return json.dumps([m.get("date", ""), m.get("time", ""),
+                       m.get("sender", ""), (m.get("text") or "")[:200]],
+                      ensure_ascii=False)
+
+
+def _accumulate_same_day(room_slug: str, today: str, export: dict) -> dict:
+    """同日の複数 scrape を **和集合** にして返す (★2026-08-03)。
+
+    事故: scrape は「今スクロールで見えている範囲」しか取れないのに、同日ファイルを
+    `write_text` で丸ごと上書きしていた。2h おきの再取得で朝に取れた投稿が消え、
+    Monday Dash の MTD (CEO の既存店前年比 canonical) が実測で 12:45 は 8/2 基準、
+    13:07 には 5/16 基準 (79日前) へ後退していた。取り込み済 wiki も同時に痩せる。
+    → 当日分を sidecar に累積し、和集合から描画する (取得できた情報は消さない)。
+
+    sidecar は取込対象外の隠しディレクトリに置く (import watcher に拾わせない)。
+    失敗しても今回の capture をそのまま返す = 従来動作へ縮退 (fail-open)。
+    """
+    try:
+        ACC_DIR.mkdir(parents=True, exist_ok=True)
+        acc_path = ACC_DIR / f"{room_slug}_{today}.json"
+        try:
+            acc = json.loads(acc_path.read_text(encoding="utf-8"))
+        except Exception:
+            acc = {"messages": [], "links": [], "extracted": []}
+
+        merged = list(acc.get("messages") or [])
+        seen = {_msg_key(m) for m in merged}
+        added = 0
+        for m in export.get("messages") or []:
+            if _msg_key(m) not in seen:
+                seen.add(_msg_key(m))
+                merged.append(m)
+                added += 1
+
+        def _union(key: str) -> list:
+            out, seen_v = list(acc.get(key) or []), set(acc.get(key) or [])
+            for v in export.get(key) or []:
+                if v not in seen_v:
+                    seen_v.add(v)
+                    out.append(v)
+            return out
+
+        out = {"messages": merged, "links": _union("links"),
+               "extracted": _union("extracted")}
+        acc_path.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+        recovered = len(merged) - len(export.get("messages") or [])
+        if recovered > 0:
+            logger.info(f"  同日累積: +{added} 新規 / {recovered} 件は今回の capture 外"
+                        f" (上書きなら失っていた分)")
+        for old in ACC_DIR.glob("*.json"):  # 保持期間超過の掃除
+            try:
+                if (date.today() - date.fromisoformat(old.stem[-10:])).days > ACC_RETAIN_DAYS:
+                    old.unlink()
+            except Exception:
+                pass
+        return {**export, **out}
+    except Exception as e:
+        logger.warning(f"  同日累積 skip ({type(e).__name__}: {e}) → 今回 capture のみ")
+        return export
+
+
 def _write_export_file(export: dict, backfill: bool = False) -> None:
     """単一ルームのエクスポートをファイルに書き出す（ファイルウォッチャーが自動取込）。"""
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     today = date.today().isoformat()
     room_slug = export["room"].replace("/", "_").replace(" ", "_")[:30]
+    if not backfill:
+        # ★2026-08-03: 同日再取得での取りこぼし消失を防ぐ (backfill は全量取得なので対象外)
+        export = _accumulate_same_day(room_slug, today, export)
     if backfill:
         filename = f"lineworks_{room_slug}_backfill_{today}.txt"
     else:

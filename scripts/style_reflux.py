@@ -51,12 +51,14 @@ OUT_DIR = BRAIN_ROOT / "clone_improve" / "style_reflux"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
-    from clone_improve_lib import line_push  # type: ignore
+    from clone_improve_lib import line_push, line_push_digest  # type: ignore
 except Exception as e:
     logger.warning(f"clone_improve_lib import failed: {e}")
     def line_push(text: str) -> bool:  # type: ignore
         logger.error(f"[LINE PUSH stub] {text}")
         return False
+    def line_push_digest(text: str, component: str = "") -> bool:  # type: ignore
+        return line_push(text)
 
 
 def _iter_jsonl(path: Path):
@@ -371,11 +373,12 @@ def run_once(days: int = 30, dry_run: bool = False) -> dict:
     if all_items:
         top3 = sorted(by_pattern.items(), key=lambda x: -len(x[1]))[:3]
         top3_str = ", ".join(f"{p}={len(v)}" for p, v in top3)
-        line_push(
-            f"📊 [Personal Brain] style 逆流 週次レポート ({today.isoformat()})\n"
+        line_push_digest(
+            f"📊 [Umiyama AI Agent] style 逆流 週次レポート ({today.isoformat()})\n"
             f"直近 {days} 日 failure {len(all_items)} 件、頻出 top 3: {top3_str}\n"
             f"詳細: data/brain/clone_improve/style_reflux/{today.isoformat()}.md\n"
-            f"or /admin/review/style-reflux?token=..."
+            f"or /admin/review/style-reflux?token=...",
+            "style逆流",
         )
 
     return {

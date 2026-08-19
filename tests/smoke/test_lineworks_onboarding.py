@@ -30,18 +30,23 @@ def test_welcome_advertises_m4_and_boundaries():
 
 
 def test_example_buttons_fit_label_limit_and_are_green():
-    """例文ボタンは LW label 20 chars 制約内 + 未取込の制度系を含まない (green のみ)。"""
+    """例文ボタンは LW label 20 chars 制約内。
+    ★2026-08-10 更新: 規程 54 PDF は取込済 + 索引 reconcile 済のため、
+    制度系 (公休) を例文に **含める** のが正 (旧: Drive 403 時代は除外していた)。
+    制度質問は社員の頻出領域なのに入口に出ていなかった = 44% 無言離脱の一因。"""
     assert 2 <= len(ob.EXAMPLE_QUERIES) <= 4
     for q in ob.EXAMPLE_QUERIES:
         assert len(q) <= 20, q
-    # 制度系 (Drive 403 で未 green) は今は載せない
     joined = "".join(ob.EXAMPLE_QUERIES)
-    assert "公休" not in joined and "産休" not in joined and "副業" not in joined
+    assert "公休" in joined, "規程FAQ の例文が入口に無い"
+    assert "売上" in joined, "コアの売上例文が消えている"
 
 
 def test_main_wires_send_welcome_at_both_sites():
     """main.py が旧定数直送でなく service の send_welcome を両接触点で呼ぶ。"""
     src = (_ROOT / "main.py").read_text(encoding="utf-8")
     assert "LINEWORKS_WELCOME" not in src, "旧定数が残存 (移設漏れ)"
-    assert src.count("from services.lineworks_onboarding import send_welcome") == 2
-    assert src.count("await send_welcome(http, user_id)") == 2
+    # ★2026-08-10: 3 箇所目 = 「利用開始」ボタン受け (既存ユーザの押し直しに例文を再掲。
+    #   初回はテキストを LLM に流さず welcome 済みのため無応答)
+    assert src.count("from services.lineworks_onboarding import send_welcome") == 3
+    assert src.count("await send_welcome(http, user_id)") == 3

@@ -127,7 +127,7 @@ def test_scrub_removes_private_wikilink_line():
 
     brain_wiki._read_wiki_state_public_compact 内の scrub() を簡易再現。
     """
-    private_paths = {"people/sample-tencho", "people/sample-tencho.md"}
+    private_paths = {"people/torii-nagahide", "people/torii-nagahide.md"}
 
     def scrub(text: str) -> str:
         out_lines = []
@@ -143,11 +143,11 @@ def test_scrub_removes_private_wikilink_line():
         return "\n".join(out_lines)
 
     src = (
-        "店長: 見本 太郎\n"
-        "| 見本 太郎 | [[people/sample-tencho]] |\n"  # 行ごと消える
+        "店長: 鳥居 長英\n"
+        "| 鳥居 長英 | [[people/torii-nagahide]] |\n"  # 行ごと消える
         "売上 100M\n"
     )
     out = scrub(src)
-    assert "見本 太郎" in out  # display text の名前は別行に残る (例: 「店長: 見本 太郎」)
-    assert "[[people/sample-tencho]]" not in out
+    assert "鳥居 長英" in out  # display text の名前は別行に残る (例: 「店長: 鳥居 長英」)
+    assert "[[people/torii-nagahide]]" not in out
     assert "売上 100M" in out

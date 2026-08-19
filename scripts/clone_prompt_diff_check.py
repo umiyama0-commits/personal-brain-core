@@ -217,7 +217,7 @@ async def main():
         if args.dry_run:
             print("[DRY RUN]\n" + "\n".join(msg_lines))
         else:
-            line_push("\n".join(msg_lines))
+            line_push("\n".join(msg_lines))  # deploy 直後の劣化検知 = 即 revert 可能な actionable、即時維持 (cross-check DA)
         return 1
 
     logger.info(f"OK: degraded={n_deg} < threshold={DEGRADED_Q_PUSH_THRESHOLD}, no push")

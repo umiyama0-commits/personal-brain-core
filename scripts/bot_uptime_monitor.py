@@ -100,6 +100,12 @@ REPO_ROOT_HOST = Path(os.getenv("BRAIN_REPO_ROOT", "/Users/brain/brain-agent"))
 # 健全 bot の不要 restart を防ぐ (bot_dead = health 失敗 は hour 不問で別途処理)。
 QUIET_HOURS_START_JST = int(os.getenv("UPTIME_QUIET_START_JST", "23"))
 QUIET_HOURS_END_JST = int(os.getenv("UPTIME_QUIET_END_JST", "8"))
+# ★2026-08-14: auto_deploy が取るメンテ lock。host_docker_watchdog.sh と同じ path を見て、
+# 意図的な停止中 (deploy / chroma 計画 rebuild) は自動 restart を譲る。
+# 30 分超の残骸は auto_deploy 自身が次サイクルで掃除する = stale lock で復旧が永久停止しない
+# よう、こちらでも同じ 30 分の staleness を適用する (放置 lock を無視して復旧を優先)。
+DEPLOY_LOCK_DIR = Path(os.getenv("BRAIN_DEPLOY_LOCK", "/tmp/brain_auto_deploy.lock"))
+DEPLOY_LOCK_STALE_MIN = 30
 
 
 def _in_quiet_hours(hour: int) -> bool:
@@ -531,6 +537,22 @@ def _count_recent_restarts(within_min: int = RESTART_RATE_WINDOW_MIN) -> int:
     return n
 
 
+def _deploy_lock_held() -> str:
+    """メンテ lock が有効に保持されているか。保持中なら人が読める理由、そうでなければ ""。
+
+    30 分超の残骸は「保持されていない」と見なす (= 異常終了で置き去りにされた lock が
+    自動復旧を無期限に殺さないため。auto_deploy 自身も同じ 30 分で rmdir する)。
+    """
+    try:
+        st = DEPLOY_LOCK_DIR.stat()
+    except (FileNotFoundError, NotADirectoryError, PermissionError):
+        return ""
+    age_min = (time.time() - st.st_mtime) / 60
+    if age_min > DEPLOY_LOCK_STALE_MIN:
+        return ""
+    return f"{DEPLOY_LOCK_DIR} ({age_min:.0f}分前から)"
+
+
 def attempt_auto_restart(reason: str) -> dict:
     """`docker compose restart line-bot` を試行 → 30s 待ち → health 再 check.
 
@@ -546,6 +568,18 @@ def attempt_auto_restart(reason: str) -> dict:
         return {
             "attempted": False, "ok": False, "recovered": False,
             "detail": "AUTO_REMEDIATE_ENABLED=0 → skip",
+        }
+
+    held = _deploy_lock_held()
+    if held:
+        # ★2026-08-14: メンテ中 (auto_deploy / 計画 rebuild) の意図的な停止に割り込まない。
+        # host_docker_watchdog は元から同じ lock を見ていたが、本 monitor だけ見ておらず、
+        # chroma 計画 rebuild (line-bot 停止 → volume wipe → 起動) の最中に 5 分 cron が
+        # restart を撃つと、削除途中の索引ディレクトリ上で chroma が開く = 7/26 と同じ
+        # 破損経路になりうる。検知と通知は従来どおり続け、自動 restart だけ譲る。
+        return {
+            "attempted": False, "ok": False, "recovered": False,
+            "detail": f"deploy/メンテ lock 保持中 ({held}) → 自動 restart は skip (通知は継続)",
         }
 
     n_recent = _count_recent_restarts()

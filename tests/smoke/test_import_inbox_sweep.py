@@ -23,15 +23,15 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 LINE_SAMPLE = """2026.04.17 金曜日
-17:46 会田次郎 @All グループ作りました
+17:46 中谷一郎 @All グループ作りました
 18:36 Take Umiyama 宜しくお願いします。
-18:59 会田次郎 備忘録です。
+18:59 中谷一郎 備忘録です。
 ---
 clone_visibility: public
 19:01 Take Umiyama ありがとうございます
-19:02 会田次郎 では次回
+19:02 中谷一郎 では次回
 19:03 Take Umiyama 了解です
-19:04 会田次郎 はい
+19:04 中谷一郎 はい
 19:05 Take Umiyama おつかれさまです
 """
 
@@ -46,11 +46,11 @@ def _seed(brain_root):
     inbox = brain_root / "import_inbox"
     inbox.mkdir(parents=True, exist_ok=True)
     (inbox / "20260705_LINETGBoard.txt").write_text(LINE_SAMPLE, encoding="utf-8")
-    (inbox / "20260705_LINEShiken_Taro.txt").write_text(LINE_SAMPLE, encoding="utf-8")
+    (inbox / "20260705_LINEKeita_Oba.txt").write_text(LINE_SAMPLE, encoding="utf-8")
     (inbox / "unlisted.txt").write_text(LINE_SAMPLE, encoding="utf-8")
     (inbox / "manifest.json").write_text(json.dumps({"files": {
         "20260705_LINETGBoard.txt": {"domain": "personal/example-garden", "label": "TG Board"},
-        "20260705_LINEShiken_Taro.txt": {"domain": "owndays", "label": "試験太郎"},
+        "20260705_LINEKeita_Oba.txt": {"domain": "owndays", "label": "大場圭太"},
     }}, ensure_ascii=False), encoding="utf-8")
     return inbox
 
@@ -63,7 +63,7 @@ def test_sweep_routes_by_domain(brain_root, monkeypatch):
     assert r["ok"], r
     assert r["delivered"] == 3
     # owndays → IMPORT_DIR に copy
-    assert (brain_root / "import" / "20260705_LINEShiken_Taro.txt").exists()
+    assert (brain_root / "import" / "20260705_LINEKeita_Oba.txt").exists()
     # manifest 無し → owndays 既定 (安全側)
     assert (brain_root / "import" / "unlisted.txt").exists()
     # personal → wiki/personal に private md、IMPORT_DIR には無い (§1.17)
@@ -87,10 +87,10 @@ def test_sweep_idempotent(brain_root, monkeypatch):
     r1 = m.sweep()
     assert r1["delivered"] == 3
     # IMPORT_DIR 側が処理済みで消えても (watcher が move する)、再配送しない
-    (brain_root / "import" / "20260705_LINEShiken_Taro.txt").unlink()
+    (brain_root / "import" / "20260705_LINEKeita_Oba.txt").unlink()
     r2 = m.sweep()
     assert r2["delivered"] == 0 and r2["skipped"] == 3
-    assert not (brain_root / "import" / "20260705_LINEShiken_Taro.txt").exists()
+    assert not (brain_root / "import" / "20260705_LINEKeita_Oba.txt").exists()
     # 内容が変わったら再配送する (sha 変化)
     (brain_root / "import_inbox" / "unlisted.txt").write_text(
         LINE_SAMPLE + "19:06 Take Umiyama 追記\n", encoding="utf-8")

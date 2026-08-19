@@ -49,7 +49,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from clone_improve_lib import (  # noqa: E402
-    call_llm, line_push, loud_fail, append_jsonl, ensure_dirs,
+    call_llm, line_push, line_push_digest, loud_fail, append_jsonl, ensure_dirs,
     load_conversations, JST, IMPROVE_DIR, pick_cross_family_judge,
 )
 
@@ -465,7 +465,7 @@ async def run_check(
             lines.append(f"    A: {r['bot_text_head']}")
         lines.append("")
         lines.append("→ wiki/style/style-response-mirroring.md / system prompt 2c-pre を再確認")
-        line_push("\n".join(lines))
+        line_push_digest("\n".join(lines), "品質判定")
         logger.info(f"LINE Push sent (degraded={len(degraded_records)})")
 
     return summary

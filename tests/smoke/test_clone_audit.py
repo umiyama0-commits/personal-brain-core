@@ -222,12 +222,8 @@ def test_list_recent_unrated_filters_audited(brain_root):
     importlib.reload(clone_history)
     importlib.reload(clone_audit)
 
-    import time
     clone_history.append("u_a", "user", "test", user_display="A")
     clone_history.append("u_a", "assistant", "reply_already_audited", user_display="A")
-    # ★秒精度 timestamp の衝突回避: list_recent_unrated は ts で assistant を dedup するため、
-    #   高速環境で 2 reply が同一秒になると一方が落ちる (別 reply の取りこぼし)。
-    time.sleep(1.1)
     clone_history.append("u_b", "user", "test2", user_display="B")
     clone_history.append("u_b", "assistant", "reply_pending_audit", user_display="B")
 
@@ -247,3 +243,58 @@ def test_list_recent_unrated_filters_audited(brain_root):
     pending_responses = [r["bot_response"] for r in result]
     assert any("reply_pending_audit" in r for r in pending_responses)
     assert not any("reply_already_audited" in r for r in pending_responses)
+
+
+def _write_history(history_dir, user_id: str, *records) -> None:
+    """clone_history jsonl を timestamp 完全固定で直書き (= append() の時刻依存を排除)。"""
+    history_dir.mkdir(parents=True, exist_ok=True)
+    lines = [json.dumps(r, ensure_ascii=False) for r in records]
+    (history_dir / f"{user_id}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+@pytest.mark.smoke
+def test_list_recent_unrated_same_second_keeps_both(brain_root):
+    """同一秒に別 user / 別内容の 2 応答 → 両方 list に出る (dedup は msg_id 判定)。
+
+    clone_history の timestamp は秒精度 (isoformat timespec="seconds") のため、高速環境
+    では別応答が同一秒に記録され得る。ts 単独 dedup だと後発 1 件が無音で脱落し
+    (= /audit-recent から消える)、公開ミラー CI で本 case が flake した。msg_id
+    (ts + user_id + response hash) 判定なら別応答は両方残る regression の固定。
+    """
+    import clone_audit
+    importlib.reload(clone_audit)
+
+    history_dir = clone_audit.BRAIN_ROOT / "clone_history"
+    same_ts = "2026-05-24T13:25:00+09:00"  # 2 応答を同一秒に強制
+    prev_ts = "2026-05-24T13:24:59+09:00"
+    _write_history(
+        history_dir, "u_x",
+        {"role": "user", "timestamp": prev_ts, "text": "売上?"},
+        {"role": "assistant", "timestamp": same_ts, "text": "全社 20M です"},
+    )
+    _write_history(
+        history_dir, "u_y",
+        {"role": "user", "timestamp": prev_ts, "text": "龍仁進捗?"},
+        {"role": "assistant", "timestamp": same_ts, "text": "店長候補 3 名選考中"},
+    )
+
+    result = clone_audit.list_recent_unrated(limit=10)
+    responses = [r["bot_response"] for r in result]
+    assert any("20M" in r for r in responses), f"u_x reply dropped: {responses}"
+    assert any("店長候補" in r for r in responses), f"u_y reply dropped: {responses}"
+    assert len(result) == 2
+
+
+@pytest.mark.smoke
+def test_list_recent_unrated_dedups_true_duplicates(brain_root):
+    """同一 ts + 同一 user + 同一内容 (= 真の重複行) は 1 件に畳む (over-retain しない)。"""
+    import clone_audit
+    importlib.reload(clone_audit)
+
+    history_dir = clone_audit.BRAIN_ROOT / "clone_history"
+    same_ts = "2026-05-24T13:25:00+09:00"
+    dup = {"role": "assistant", "timestamp": same_ts, "text": "全社 20M です"}
+    _write_history(history_dir, "u_dup", dup, dup)
+
+    result = clone_audit.list_recent_unrated(limit=10)
+    assert len([r for r in result if "20M" in r["bot_response"]]) == 1

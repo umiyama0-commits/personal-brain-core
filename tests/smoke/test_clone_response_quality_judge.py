@@ -26,7 +26,7 @@ def test_substantive_response_filter():
     assert _is_substantive_response("お休みをいただいてます。しばらく経ってから") is False
     assert _is_substantive_response("申し訳ありません。少し時間を置いて") is False
     # 通常応答 = 採点対象
-    assert _is_substantive_response("サンプル駅前店、今日の数字は客数 12 / 売上 38 万 / 単価 31700 円。") is True
+    assert _is_substantive_response("武蔵小山パルム、今日の数字は客数 12 / 売上 38 万 / 単価 31700 円。") is True
     assert _is_substantive_response("そうね、元気出ない時あるよね。無理に上げようとしないことが大事。") is True
 
 
@@ -172,7 +172,7 @@ def test_is_fallback_response_matches_known_phrases():
     assert _is_fallback_response("申し訳ありません。少し時間を置いて") is True
     assert _is_fallback_response("[error] internal") is True
     # 通常応答は False
-    assert _is_fallback_response("サンプル駅前店、客数 12 / 売上 38 万") is False
+    assert _is_fallback_response("武蔵小山パルム、客数 12 / 売上 38 万") is False
     assert _is_fallback_response("そうね、元気出ない時あるよね") is False
     assert _is_fallback_response("") is False
     assert _is_fallback_response(None) is False

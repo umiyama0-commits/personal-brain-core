@@ -19,11 +19,16 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # baseline (2026-07-10 実測)。**endpoint 数が hard ratchet** (新規 API surface = god object の本質。
 # 上げるのは原則禁止=移設で減ったら下げる)。line 数は「大量投下」検知用の緩い天井 (小さな wiring
 # 追加=bug fix や services 委譲の呼出しは許容、feature 丸ごと投下だけ止める)ため実数+余裕を持たせる。
-MAX_ENDPOINTS = 48
-# 現 7909 (2026-07-14 Vapi 7/15 認証必須化への録音 DL 移行 +50 行 = 外部 breaking change
-# 対応。認証 endpoint/fallback/loud_fail。endpoint +0)。line 数は「大量投下検知」の
-# 緩い天井 = 小 wiring は実数に追随して通し、feature 丸ごと (数百行) 投下を止める。
-MAX_LINES = 7920
+# 49 = /store-survey 復活分 (acf05f2 revert: AM が入力中の実運用フォームを誤削除→復旧。
+# 新規 feature でなく既存 surface の restoration)。次の下げ先: store-survey 系を routes/ へ移設。
+MAX_ENDPOINTS = 49
+# 現 7981 (2026-07-20 売上フォローアップ対応の pre-route 拡張 = 「日本の」型を直前売上質問と
+# 併合して clone へ。YoY/日本認識ロジックは helper 分離、main.py は wiring のみ)。
+# line 数は「大量投下検知」の緩い天井 = 小 wiring は実数に追随。
+MAX_LINES = 7997  # ★2026-08-03: web-config の深層人格 平文露出の封鎖 (+13 行の wiring のみ。
+# interview 絞り込み / 要約遮断 / personal 話題除外の 3 判定はいずれも
+# brain_wiki_helpers/voice_visibility.py 側の pure function に置き、main.py は呼ぶだけ。
+# endpoint 数は 49 で不変 = hard ratchet は動かしていない)
 
 _ROUTE_RE = re.compile(r"^@app\.(get|post|put|delete|patch|websocket)\(", re.MULTILINE)
 

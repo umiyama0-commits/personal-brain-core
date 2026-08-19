@@ -25,17 +25,17 @@ updated: 2026-07-13
 
 | # | 名称 | 客数 | 売上 (JPY) | 客単価 (JPY) |
 |---|------|------|-----------|-------------|
-| 1 | 関東Bエリア | 500 | 7,500,000 | 15,000 |
-| 2 | 関東Aエリア | 400 | 5,200,000 | 13,000 |
-| 3 | 九州Aエリア | 300 | 3,600,000 | 12,000 |
+| 1 | 関東Bエリア | 709 | 10,193,066 | 14,376 |
+| 2 | 関東Aエリア | 689 | 9,654,969 | 14,013 |
+| 3 | 九州Aエリア | 600 | 8,000,000 | 13,333 |
 | 12 | 関東エリア | 0 | 0 | 0 |
 
 ## 2026-07-07 (火)
 
 | # | 名称 | 客数 | 売上 (JPY) | 客単価 (JPY) |
 |---|------|------|-----------|-------------|
-| 1 | 関東Bエリア | 600 | 9,000,000 | 15,000 |
-| 2 | 関東Aエリア | 500 | 6,500,000 | 13,000 |
+| 1 | 関東Bエリア | 756 | 10,693,275 | 14,144 |
+| 2 | 関東Aエリア | 653 | 9,332,988 | 14,292 |
 | 12 | 関東エリア | 0 | 0 | 0 |
 """
 
@@ -74,10 +74,10 @@ def test_dimension_detection():
     assert dhi.detect_dimension("先週の業態別売上") == ("type", [])
     assert dhi.detect_dimension("台湾の先週の売上") == ("nation", ["台湾"])
     assert dhi.detect_dimension("先週の天気") is None          # 売上系ワード無し
-    # scope 明示無しの売上は default 日本 (全社/他国は明示時のみ)
+    # ★2026-07-20 海山: scope 明示無しの売上は default 日本 (全社/他国は明示時のみ)
     assert dhi.detect_dimension("先週の売上") == ("nation", ["日本"])
     assert dhi.detect_dimension("昨日の全社の売上") is None      # 全社明示 → 全社経路
-    # 「日本一…」は default 日本 に落ちるが、日付が無いので注入されない
+    # 「日本一…」は 日本 を誤 token 化しない (default 日本 に落ちるが、日付が無いので注入されない)
     assert dhi.detect_dimension("日本一の売上を目指す") == ("nation", ["日本"])
     assert dhi.build_context("日本一の売上を目指す", knowledge_dir=None) is None  # 日付無し=注入なし
 
@@ -88,9 +88,9 @@ def test_build_context_totals_and_missing(tmp_path):
                             today=_TODAY, knowledge_dir=_knowledge_dir(tmp_path))
     assert ctx is not None
     # 決定論集計: A+B 合算 (7/06+7/07 の 2 日分)、恒常 0 行は除外
-    assert "関東Bエリア: 客数 1,100 / 売上 16,500,000円" in ctx
-    assert "関東Aエリア: 客数 900 / 売上 11,700,000円" in ctx
-    assert "合計" in ctx and "客数 2,000" in ctx and "28,200,000円" in ctx
+    assert "関東Bエリア: 客数 1,465 / 売上 20,886,341円" in ctx
+    assert "関東Aエリア: 客数 1,342 / 売上 18,987,957円" in ctx
+    assert "合計" in ctx and "客数 2,807" in ctx and "39,874,298円" in ctx
     # fixture に無い 7/08-7/12 は「データが無い」明示
     assert "2026-07-08" in ctx and "データが存在しない日" in ctx
     # 他エリアの行はフィルタで落ちる
@@ -121,7 +121,7 @@ def test_guard_allows_rounded_oku_man_expressions(tmp_path):
     「約2,000万」等で毎回発火すると全売上応答が脚注だらけになる → 億/万 は検知対象外を pin。"""
     ctx = dhi.build_context("先週の関東エリアの売り上げ",
                             today=_TODAY, knowledge_dir=_knowledge_dir(tmp_path))
-    rounded = "先週の関東は合計で約0.3億円、B が 1,600万円ちょい上回る感じだね。"
+    rounded = "先週の関東は合計で約0.4億円、B が 2,000万円ちょい上回る感じだね。"
     assert dhi.sales_numeric_guard(rounded, ctx) == rounded  # 発火しない
 
 
@@ -136,15 +136,15 @@ def test_build_context_none_when_no_trigger(tmp_path):
 def test_sales_numeric_guard_catches_fabrication(tmp_path):
     ctx = dhi.build_context("先週の関東エリアの売り上げ",
                             today=_TODAY, knowledge_dir=_knowledge_dir(tmp_path))
-    fabricated = "先週の関東は客数 9,999、売上 123,456,789円だったよ。"
+    fabricated = "先週の関東は客数 9,780、売上 111,222,333円だったよ。"
     out = dhi.sales_numeric_guard(fabricated, ctx)
-    assert "確定値" in out and "16,500,000" in out  # 正値が決定論追記される
+    assert "確定値" in out and "20,886,341" in out  # 正値が決定論追記される
 
 
 def test_sales_numeric_guard_passes_clean_reply(tmp_path):
     ctx = dhi.build_context("先週の関東エリアの売り上げ",
                             today=_TODAY, knowledge_dir=_knowledge_dir(tmp_path))
-    clean = "関東Bは客数 1,100 / 売上 16,500,000円、Aは 900 / 11,700,000円だね。"
+    clean = "関東Bは客数 1,465 / 売上 20,886,341円、Aは 1,342 / 18,987,957円だね。"
     assert dhi.sales_numeric_guard(clean, ctx) == clean
 
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# health_cron.sh — 売上データパイプライン 3 層ヘルスチェック cron wrapper
+# health_cron.sh — 売上データパイプライン 5 層ヘルスチェック cron wrapper
 #
 # 05:30 JST 毎日実行する想定 (sales_accuracy_check.py の 06:00 より前)。
 # crontab -e で以下を追加:
@@ -35,4 +35,12 @@ echo "$(date): ===== sales_data_health start ====="
 python3 scripts/sales_data_health.py "$@"
 RC=$?
 echo "$(date): ===== sales_data_health end (exit=$RC) ====="
+
+# ★2026-08-03: 「要求した model が本当にその model で処理されたか」の日次検証。
+# temperature 400 → 無言 gpt-4o fallback で 25日 $182 を溶かし、judge の別系列防壁も
+# 無効化していた事故 (200 OK で返るため完全に無音) の再発検知。probe は ~10 token/回。
+echo "$(date): ===== litellm_route_probe start ====="
+python3 scripts/litellm_route_probe.py || true
+echo "$(date): ===== litellm_route_probe end ====="
+
 exit $RC

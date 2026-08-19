@@ -64,12 +64,12 @@ def test_keyword_alias_proposed_pending(agent, monkeypatch, tmp_path):
     monkeypatch.setattr(agent, "AUTOFIX", True)
     monkeypatch.setattr(agent, "ALIASES_PATH", tmp_path / "aliases.json")
     diag = {"has_issue": True, "fix_category": "keyword", "issue_type": "keyword_miss",
-            "alias_term": "サンプルリンク", "alias_synonyms": ["新規出店PJ"], "proposed_fix": "x"}
-    r = agent.route(diag, agent.PERSONAS[0], "サンプルリンクって何", "resp", seen={}, autofix_remaining=3)
+            "alias_term": "クリエイトリンク", "alias_synonyms": ["包括出店PJ"], "proposed_fix": "x"}
+    r = agent.route(diag, agent.PERSONAS[0], "クリエイトリンクって何", "resp", seen={}, autofix_remaining=3)
     assert r["action"] == "proposed_alias"
     data = json.loads((tmp_path / "aliases.json").read_text(encoding="utf-8"))
-    assert "新規出店PJ" in data["サンプルリンク"]["aliases"]
-    assert data["サンプルリンク"]["enabled"] is False, "未承認で記録 (検索に効かない)"
+    assert "包括出店PJ" in data["クリエイトリンク"]["aliases"]
+    assert data["クリエイトリンク"]["enabled"] is False, "未承認で記録 (検索に効かない)"
 
 
 @pytest.mark.smoke
@@ -77,12 +77,12 @@ def test_approve_alias(agent, monkeypatch, tmp_path):
     """海山承認で enabled=True、取消で False、存在しない term は False。"""
     af = tmp_path / "aliases.json"
     monkeypatch.setattr(agent, "ALIASES_PATH", af)
-    af.write_text(json.dumps({"サンプルリンク": {"aliases": ["新規出店PJ"], "enabled": False}},
+    af.write_text(json.dumps({"クリエイトリンク": {"aliases": ["包括出店PJ"], "enabled": False}},
                              ensure_ascii=False), encoding="utf-8")
-    assert agent.approve_alias("サンプルリンク", True) is True
-    assert json.loads(af.read_text(encoding="utf-8"))["サンプルリンク"]["enabled"] is True
-    assert agent.approve_alias("サンプルリンク", False) is True
-    assert json.loads(af.read_text(encoding="utf-8"))["サンプルリンク"]["enabled"] is False
+    assert agent.approve_alias("クリエイトリンク", True) is True
+    assert json.loads(af.read_text(encoding="utf-8"))["クリエイトリンク"]["enabled"] is True
+    assert agent.approve_alias("クリエイトリンク", False) is True
+    assert json.loads(af.read_text(encoding="utf-8"))["クリエイトリンク"]["enabled"] is False
     assert agent.approve_alias("存在しない", True) is False
 
 

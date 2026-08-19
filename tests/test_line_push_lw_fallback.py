@@ -63,6 +63,7 @@ def _spy_lw(monkeypatch, calls: list, result: bool = True):
 
 def _no_cap(monkeypatch, tmp_path):
     monkeypatch.setattr(lib, "_LINE_PUSH_STATE", tmp_path / "state.json")
+    monkeypatch.setattr(lib, "NOTIFY_DIGEST_QUEUE", tmp_path / "digest.jsonl")
     monkeypatch.delenv("LINE_PUSH_DAILY_CAP", raising=False)
     monkeypatch.delenv("LW_FALLBACK_DISABLE", raising=False)
 
@@ -153,12 +154,19 @@ def test_fallback_without_admin_id_is_false(monkeypatch, tmp_path):
 
 
 # ─── 日次 cap ──────────────────────────────────────────────
-def test_daily_cap_drops_noncritical_overflow(monkeypatch, tmp_path):
-    """★2026-07-10: cap 超の非critical は drop (LW に流さない)。"""
+def test_daily_cap_diverts_noncritical_overflow(monkeypatch, tmp_path):
+    """★2026-07-10: cap 超の非critical は LW に流さない。
+    ★2026-08-03: 落とし先は drop → digest queue (内容は保全、追加コストは実質ゼロ)。"""
     monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "tok")
     monkeypatch.setenv("ALIGNMENT_TARGET_USER", "U1")
     monkeypatch.setenv("LINE_PUSH_DAILY_CAP", "2")
     monkeypatch.setattr(lib, "_LINE_PUSH_STATE", tmp_path / "state.json")
+    monkeypatch.setattr(lib, "NOTIFY_DIGEST_QUEUE", tmp_path / "digest.jsonl")
+    # ★2026-08-17: _daily_cap は 2026-08-03 から月枠の実残量で動的に決まるようになり、
+    # LINE_PUSH_DAILY_CAP は「state が無い時の fallback」に格下げされた。この state を
+    # 隔離しないと **本番の残量次第でテストが赤になる** (実際 171/200 消費時に cap=2 と
+    # 算出され、cap=1 前提の本 test が落ちた)。tmp に逃がして env の値を効かせる。
+    monkeypatch.setattr(lib, "_LINE_QUOTA_STATE", tmp_path / "quota_month.json")
     monkeypatch.delenv("LW_FALLBACK_DISABLE", raising=False)
     _FakeClient.status = 200
 
@@ -175,9 +183,10 @@ def test_daily_cap_drops_noncritical_overflow(monkeypatch, tmp_path):
 
     assert lib.line_push("1") is True    # personal 1通目
     assert lib.line_push("2") is True    # personal 2通目 (cap=2 到達)
-    assert lib.line_push("3") is False   # 3通目 → drop (LW に流さない)
-    assert personal_calls["n"] == 2
+    assert lib.line_push("3") is True    # 3通目 → digest 回送 (LW には流さない)
+    assert personal_calls["n"] == 2, "回送分が即時 push に漏れている"
     assert lw_calls == []
+    assert "3" in lib.NOTIFY_DIGEST_QUEUE.read_text(encoding="utf-8")
 
 
 def test_critical_bypasses_daily_cap(monkeypatch, tmp_path):
@@ -186,6 +195,12 @@ def test_critical_bypasses_daily_cap(monkeypatch, tmp_path):
     monkeypatch.setenv("ALIGNMENT_TARGET_USER", "U1")
     monkeypatch.setenv("LINE_PUSH_DAILY_CAP", "1")
     monkeypatch.setattr(lib, "_LINE_PUSH_STATE", tmp_path / "state.json")
+    monkeypatch.setattr(lib, "NOTIFY_DIGEST_QUEUE", tmp_path / "digest.jsonl")
+    # ★2026-08-17: _daily_cap は 2026-08-03 から月枠の実残量で動的に決まるようになり、
+    # LINE_PUSH_DAILY_CAP は「state が無い時の fallback」に格下げされた。この state を
+    # 隔離しないと **本番の残量次第でテストが赤になる** (実際 171/200 消費時に cap=2 と
+    # 算出され、cap=1 前提の本 test が落ちた)。tmp に逃がして env の値を効かせる。
+    monkeypatch.setattr(lib, "_LINE_QUOTA_STATE", tmp_path / "quota_month.json")
     monkeypatch.delenv("LW_FALLBACK_DISABLE", raising=False)
     _FakeClient.status = 200
 
@@ -201,10 +216,13 @@ def test_critical_bypasses_daily_cap(monkeypatch, tmp_path):
     _spy_lw(monkeypatch, lw_calls)
 
     assert lib.line_push("1") is True                     # cap=1 到達
-    assert lib.line_push("2") is False                    # 非critical → drop
+    # ★2026-08-03: 上限超の非 critical は drop ではなく digest へ回送 (欠落ゼロ)。
+    # 本 test の不変条件は「LW には流さない」であり、それは維持される。
+    assert lib.line_push("2") is True                     # 非critical → digest 回送
     assert lib.line_push("dead!", critical=True) is True  # critical → cap 無視で personal
-    assert personal_calls["n"] == 2
+    assert personal_calls["n"] == 2, "digest 回送分が即時 push に漏れている"
     assert lw_calls == []
+    assert "2" in lib.NOTIFY_DIGEST_QUEUE.read_text(encoding="utf-8")
 
 
 def test_cap_zero_disables(monkeypatch, tmp_path):
@@ -212,6 +230,7 @@ def test_cap_zero_disables(monkeypatch, tmp_path):
     monkeypatch.setenv("ALIGNMENT_TARGET_USER", "U1")
     monkeypatch.setenv("LINE_PUSH_DAILY_CAP", "0")
     monkeypatch.setattr(lib, "_LINE_PUSH_STATE", tmp_path / "state.json")
+    monkeypatch.setattr(lib, "NOTIFY_DIGEST_QUEUE", tmp_path / "digest.jsonl")
     _FakeClient.status = 200
     monkeypatch.setattr(lib.httpx, "Client", _FakeClient)
     for i in range(20):

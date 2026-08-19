@@ -120,6 +120,8 @@ def detect_store_keyword(
     raw_tokens = QUERY_SEPARATOR.split(query)
     # 長さ 3 以上の token を採用 (「池袋」「錦糸町」等 2-3 字の地名もキャッチ)
     tokens = [t.strip() for t in raw_tokens if t and 3 <= len(t.strip()) <= 15]
+    # 語境界判定用 (2 字の「池袋」等も残す。部分文字列 latch を防ぐ土台)
+    boundary_tokens = [t.strip() for t in raw_tokens if t and t.strip()]
 
     # 各 token で prefix match を試す (unique 採用)
     for token in tokens:
@@ -146,13 +148,29 @@ def detect_store_keyword(
             if len(name) >= 3:
                 short_prefix_map.setdefault(name[:3], []).append(name)
 
-        # 各短 prefix がクエリに含まれてて、unique なら採用
+        # 各短 prefix が **token の先頭** と一致してて、unique なら採用
+        # ★2026-08-06 事故: 判定が `prefix in query` (語境界を見ない素の部分文字列) だったため、
+        #   「イ|オン|浦安」の中の『オン』が 738 店中ただ 1 つ『オン』で始まる
+        #   「オンデーズオンラインショップ」に unique match し、**別店舗の売上が注入**されていた。
+        #   実測: 「イオンモール○○」を「イオン○○」と略した 291 店中 67 店 (23%) が
+        #   全滅 (正解 0%)、実ログでも店舗絡み売上質問 118 件中 82 件 (69%) が誤発火。
+        #   token 境界を要求すれば「池袋」「川崎ダイス」等の本来の用途は保たれる
+        #   (「イオン浦安」.startswith("オン") は False = latch しない)。
         for prefix, names in short_prefix_map.items():
             if len(names) != 1:
                 continue  # 複数候補は曖昧
             if prefix in PREFIX_BLOCKLIST:
                 continue
-            if prefix in query:
+            # token を prefix がほぼ覆っている時だけ採用する。
+            # ★2026-08-06: 「立川立飛」の頭 2 字『立川』が別店「立川高島屋S.C.」に
+            #   unique match し、正解「ららぽーと立川立飛」を押し退けていた。
+            #   token の残りが 2 字以上あるなら、それは別の店を指している合図。
+            # ★2026-08-06 追補: slack (1 字) を許すのは日本語 prefix だけ。
+            #   英字は語が長く「Mal」が「Mall」を捕まえるため、`AEON Mall の売上は?`
+            #   が常にインドネシアの 1 店 (Mal SKA Pekanbaru) に化けていた (実測)。
+            _slack = 0 if prefix.isascii() else 1
+            if any(t.startswith(prefix) and len(t) - len(prefix) <= _slack
+                   for t in boundary_tokens):
                 name = names[0]
                 # 短 prefix なのでスコアは低め (+50)
                 score = len(prefix) + 50
@@ -160,8 +178,35 @@ def detect_store_keyword(
                     best_score = score
                     best_name = name
 
+    # 2.7) 表記ゆれ吸収 (★2026-08-06)。社員は正式名で呼ばない —
+    #      「イオン浦安」(正式: イオン新浦安)、「イオン津田沼」(正式: イオンモール津田沼North)
+    #      のように **文字が抜けた** 形で聞く。token の文字が順序を保って店名に現れる
+    #      (= 部分列) 店を探し、**一意な時だけ** 採用する。
+    #      3) の接尾辞一致より先に置く: 接尾辞は語境界を見ないため
+    #      「イオ|ン出雲」の『ン出雲』が「ゆめタウン出雲」に当たる等、
+    #      別チェーンへ流れる (実測 72 件中 3 件)。一意な部分列の方が強い証拠。
+    # ★2026-08-06 追補: 発火条件が `best_name is None` だと、2.5) の弱い 2-3 字 prefix
+    #   (+50) が先に埋めた時点で正解の部分列ヒットが捨てられる。
+    #   実測 (740 店 × 1 字脱落 8,016 query): この順序バグだけで
+    #   「修正前は正解 → 修正後は別店」の退行が 47 件出ていた (うち 45 件は部分列が
+    #   正解を持っていた)。一意な部分列は短 prefix より強い証拠なので +80 で競合させる。
+    ambiguous = False
+    if best_score < 100:  # 完全一致 (+200) / 長 token prefix (+100) 以外
+        _seq, ambiguous = _resolve_by_subsequence(boundary_tokens, store_names)
+        if _seq is not None and 80 > best_score - 100:
+            _seq_score = len(_seq) + 80
+            if _seq_score > best_score:
+                best_score = _seq_score
+                best_name = _seq
+
     # 3) 接尾辞一致 (3 文字以上、blocklist 外、既存ロジック緩和)
     # ★2026-05-15: 4→3 に緩和 (「八幡東」「川崎」suffix もキャッチ)
+    # ★2026-08-06: 曖昧が判明している時は接尾辞で推測しない。
+    #   「イオン郡山」は イオンモール郡山 / イオンタウン郡山 の2店に当たるが、
+    #   接尾辞一致は語境界を見ないため『ン郡山』でタウン側に倒れていた。
+    #   誤注入 >> データ無し のコスト非対称に従い、曖昧なら聞き返させる。
+    if best_name is not None or ambiguous:
+        return best_name
     for name in sorted(store_names):
         if name in query:
             continue  # 完全一致は既に処理済
@@ -176,6 +221,147 @@ def detect_store_keyword(
                 break
 
     return best_name
+
+
+# 部分列マッチの最短 token 長。3 字以下だと候補が爆発し誤検出コストが利得を上回る
+SUBSEQ_MIN_LEN = 4
+
+
+def _is_subsequence(needle: str, haystack: str) -> bool:
+    """needle の全文字が順序を保って haystack に現れるか。"""
+    it = iter(haystack)
+    return all(ch in it for ch in needle)
+
+
+def _resolve_by_subsequence(tokens, store_names) -> tuple[Optional[str], bool]:
+    """表記ゆれ (文字の脱落) を吸収する。戻り値は (店名 or None, 曖昧だったか)。
+
+    「確信が無ければ埋めない」(誤注入 >> データ無し のコスト非対称) の原則は維持する —
+    複数店に当たったら None + ambiguous=True を返し、以降の弱い推測も止めて聞き返させる。
+    """
+    ambiguous = False
+    for token in sorted(tokens, key=len, reverse=True):
+        if len(token) < SUBSEQ_MIN_LEN or token in PREFIX_BLOCKLIST:
+            continue
+        hits = [n for n in store_names if len(n) > len(token) and _is_subsequence(token, n)]
+        if len(hits) == 1:
+            return hits[0], False
+        if len(hits) > 1:
+            ambiguous = True
+    return None, ambiguous
+
+
+# ───────────────────────────────────────────────────────────────────
+# ★2026-08-09 海山指示: 「吉祥寺は今後 吉祥寺店 と 吉祥寺マルイ店 が並ぶ。
+#   新宿・銀座のように 2 文字で聞かれるケースもある」
+#
+#   従来は曖昧な地名を _LOCATION_BLOCKLIST で **丸ごと封鎖** していた
+#   (新宿/渋谷/横浜/名古屋)。誤検出は防げるが、社員が最も使う呼び方に
+#   一切答えられない = 「安全だが役に立たない」状態だった。
+#   実測: 新宿 3店 (アルタ/マルイアネックス/東口)、吉祥寺 2店、渋谷 2店、横浜 3店。
+#
+#   **黙るのではなく候補を返す**。「新宿は3店ありますが、どれですか」と
+#   聞き返せる方が、社員にとって明らかに有用。候補は店舗マスターから
+#   決定論的に引くので捏造は起きない。
+# ───────────────────────────────────────────────────────────────────
+
+# 地名として扱わない token (店名に偶然含まれても候補にしない)
+_NON_PLACE_TOKENS: frozenset = frozenset({
+    "売上", "客数", "客単価", "実績", "予算", "全社", "全店", "本部", "会社",
+    "今日", "本日", "昨日", "今週", "先週", "今月", "先月", "今年", "去年",
+})
+PLACE_MIN_LEN = 2       # 「新宿」「銀座」= 2 文字を拾う
+PLACE_MAX_CANDIDATES = 6  # これを超える token は地名でなく汎用語とみなす
+
+
+def resolve_store(
+    query: str, stores_content: str, daily_stores_content: str = ""
+) -> tuple[Optional[str], list[str]]:
+    """店舗を解決する。戻り値 = (確定した店名 or None, 候補一覧)。
+
+    候補が 1 つに絞れれば第 1 要素に入り、複数なら第 2 要素だけが埋まる
+    (= 呼び手が「どれですか」と聞き返す)。どちらも空なら店舗質問ではない。
+
+    detect_store_keyword (従来の厳格判定) を先に通し、それが None の時だけ
+    地名の部分一致で候補を集める = 既存の精度は一切下げない。
+    """
+    store_names = _collect_store_names(stores_content, daily_stores_content)
+    if not store_names:
+        return None, []
+
+    exact = detect_store_keyword(query, stores_content, daily_stores_content)
+    if exact:
+        # ★2026-08-09 海山指摘「吉祥寺は今後 吉祥寺店 と 吉祥寺マルイ店 が並ぶ」:
+        #   店名そのものが別店の **前方部分** になっている時 (吉祥寺 ⊂ 吉祥寺マルイ)、
+        #   完全一致で 1 店に確定すると **2 店あるのに聞き返さず片方を答える**。
+        #   確定名を含むより長い店名があれば、候補として一緒に返す。
+        siblings = sorted(n for n in store_names if n != exact and exact in n)
+        if siblings:
+            return None, sorted([exact] + siblings)
+        return exact, [exact]
+
+    tokens = [t.strip() for t in QUERY_SEPARATOR.split(query) if t and t.strip()]
+    best: list[str] = []
+    for token in sorted(tokens, key=len, reverse=True):
+        if len(token) < PLACE_MIN_LEN or token in _NON_PLACE_TOKENS:
+            continue
+        hits = sorted(n for n in store_names if token in n)
+        if not hits:
+            # 「イオン郡山」のように施設 prefix 付きで呼ばれた時は、
+            # 部分列 (文字が順序を保って現れる) で候補を集める。
+            # 実測: イオンモール郡山 / イオンタウン郡山 の 2 店に当たるので
+            # 「どちらですか」と聞き返せる (従来は候補ゼロで黙っていた)。
+            hits = sorted(n for n in store_names
+                          if len(n) > len(token) and _is_subsequence(token, n))
+        # 候補が多すぎる = 地名でなく汎用語 (「モール」等) を掴んでいる
+        if hits and len(hits) <= PLACE_MAX_CANDIDATES:
+            best = hits
+            break
+    if len(best) == 1:
+        return best[0], best
+    return None, best
+
+
+def resolve_reply_against_candidates(
+    reply: str, candidates: list[str]
+) -> Optional[str]:
+    """聞き返しへの返信を **候補集合の中だけ** で解決する (★2026-08-10)。
+
+    事故 (再ローンチ前の実測): bot が「新宿は 3 店: アルタ / マルイアネックス / 東口」と
+    聞き返した後、社員が「アルタ」と返すと、全店マスターに対する検出が
+    **アル・プラザ鹿島** (「アル」2 字 prefix latch) に化けていた。「マルイ」も
+    マルイファミリー溝口 に化ける。= 聞き返しループが閉じず、別店の数字を出す寸前だった。
+
+    候補は直前ターンで確定済みの集合なので、その中だけで照合すれば
+    弱い全店マッチより常に強い証拠になる。一意に絞れない時は None (もう一度聞き返す)。
+    """
+    if not reply or not candidates:
+        return None
+    if has_reset_marker(reply):
+        return None  # 「全社で」等 = 店舗の文脈を抜けた
+    # 1) 候補名がそのまま返信に含まれる (「新宿アルタで」)
+    full = [c for c in candidates if c in reply]
+    if len(full) == 1:
+        return full[0]
+    if len(full) > 1:
+        # 「吉祥寺マルイで」は 吉祥寺 と 吉祥寺マルイ の両方に完全一致する。
+        # 最長の候補が他の一致候補を全て内包するなら、それが指名 (より具体的な方が勝つ)。
+        longest = max(full, key=len)
+        if all(c in longest for c in full):
+            return longest
+        return None  # 別々の店を両方 named = まだ曖昧
+    # 2) 返信 token が候補名の一部 (「アルタ」⊂「新宿アルタ」)、だめなら部分列
+    toks = [t.strip() for t in QUERY_SEPARATOR.split(reply)
+            if t and len(t.strip()) >= 2]
+    for t in sorted(toks, key=len, reverse=True):
+        hits = [c for c in candidates if t in c]
+        if not hits:
+            hits = [c for c in candidates if _is_subsequence(t, c)]
+        if len(hits) == 1:
+            return hits[0]
+        if len(hits) > 1:
+            return None  # この token では絞れない = 聞き直す
+    return None
 
 
 # ───────────────────────────────────────────────────────────────────

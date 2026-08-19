@@ -29,13 +29,13 @@ def graph_with_seed(tmp_path, monkeypatch):
         "valid_to": "2026-04-30",
         "stores": [
             {"code": 101, "name": "渋谷店", "prefecture": "東京", "area": "関東A",
-             "type": "直営", "league": "J1", "am": "見本AM二郎", "sv": "見本SV一郎",
+             "type": "直営", "league": "J1", "am": "中田将也", "sv": "鈴木和典",
              "manager": "佐藤一郎"},
             {"code": 102, "name": "新宿店", "prefecture": "東京", "area": "関東A",
-             "type": "直営", "league": "J1", "am": "見本AM二郎", "sv": "見本SV一郎",
+             "type": "直営", "league": "J1", "am": "中田将也", "sv": "鈴木和典",
              "manager": "山田次郎"},
             {"code": 201, "name": "梅田店", "prefecture": "大阪", "area": "西日本A",
-             "type": "直営", "league": "J1", "am": "見本AM一子", "sv": "見本SV九郎",
+             "type": "直営", "league": "J1", "am": "谷口里美", "sv": "高橋健",
              "manager": "鈴木三郎"},
         ],
     }
@@ -45,13 +45,13 @@ def graph_with_seed(tmp_path, monkeypatch):
         "valid_to": "2026-05-31",
         "stores": [
             {"code": 101, "name": "渋谷店", "prefecture": "東京", "area": "関東A",
-             "type": "直営", "league": "J1", "am": "見本AM二郎", "sv": "見本SV一郎",
+             "type": "直営", "league": "J1", "am": "中田将也", "sv": "鈴木和典",
              "manager": "佐藤一郎"},
             {"code": 102, "name": "新宿店", "prefecture": "東京", "area": "関東A",
-             "type": "直営", "league": "J1", "am": "見本AM三郎", "sv": "見本SV一郎",  # AM 変更
+             "type": "直営", "league": "J1", "am": "渡邉俊也", "sv": "鈴木和典",  # AM 変更
              "manager": "山田次郎"},
             {"code": 201, "name": "梅田店", "prefecture": "大阪", "area": "西日本A",
-             "type": "直営", "league": "J1", "am": "見本AM一子", "sv": "見本SV九郎",
+             "type": "直営", "league": "J1", "am": "谷口里美", "sv": "高橋健",
              "manager": "鈴木三郎"},
         ],
     }
@@ -84,15 +84,15 @@ def test_load_snapshot_basic(graph_with_seed):
 
 @pytest.mark.smoke
 def test_query_am_stores(graph_with_seed):
-    """見本AM二郎 AM の管轄店 (snapshot A は 2 件、B は 1 件)。"""
+    """中田将也 AM の管轄店 (snapshot A は 2 件、B は 1 件)。"""
     mod, _ = graph_with_seed
     g_a = mod.load_snapshot("2026-04-01")
-    stores = mod.query_am_stores(g_a, "見本AM二郎")
+    stores = mod.query_am_stores(g_a, "中田将也")
     assert len(stores) == 2
     assert {s.name for s in stores} == {"渋谷店", "新宿店"}
 
     g_b = mod.load_snapshot("2026-05-19")
-    stores_b = mod.query_am_stores(g_b, "見本AM二郎")
+    stores_b = mod.query_am_stores(g_b, "中田将也")
     assert len(stores_b) == 1
     assert stores_b[0].name == "渋谷店"
 
@@ -102,10 +102,10 @@ def test_query_sv_am(graph_with_seed):
     """SV の上司 AM。"""
     mod, _ = graph_with_seed
     g = mod.load_snapshot("2026-05-19")
-    # 見本SV一郎 SV は (B では) 渋谷店経由で見本AM二郎 / 新宿店経由で見本AM三郎、
+    # 鈴木和典 SV は (B では) 渋谷店経由で中田将也 / 新宿店経由で渡邉俊也、
     # sv_to_am は store loop の最後で上書きされるため最後の店の AM を返す
-    am = mod.query_sv_manager_am(g, "見本SV一郎")
-    assert am in ("見本AM二郎", "見本AM三郎")  # 順序依存だが両方妥当
+    am = mod.query_sv_manager_am(g, "鈴木和典")
+    assert am in ("中田将也", "渡邉俊也")  # 順序依存だが両方妥当
 
 
 @pytest.mark.smoke
@@ -114,31 +114,31 @@ def test_query_prefecture_ams(graph_with_seed):
     mod, _ = graph_with_seed
     g = mod.load_snapshot("2026-05-19")
     ams = mod.query_prefecture_ams(g, "東京")
-    assert ams == {"見本AM二郎", "見本AM三郎"}
+    assert ams == {"中田将也", "渡邉俊也"}
 
 
 @pytest.mark.smoke
 def test_query_diff_am_stores(graph_with_seed):
-    """○○ AM が A→B で失った店 = 新宿店 (→ 渡邉)。"""
+    """中田 AM が A→B で失った店 = 新宿店 (→ 渡邉)。"""
     mod, _ = graph_with_seed
     g_a = mod.load_snapshot("2026-04-01")
     g_b = mod.load_snapshot("2026-05-19")
-    result = mod.query_diff_am_stores(g_a, g_b, "見本AM二郎")
+    result = mod.query_diff_am_stores(g_a, g_b, "中田将也")
     assert result["n_in_from"] == 2
     assert result["n_still_in_to"] == 1
     assert result["n_moved_away"] == 1
     moved = result["moved_away"][0]
     assert moved["name"] == "新宿店"
-    assert moved["to_am"] == "見本AM三郎"
+    assert moved["to_am"] == "渡邉俊也"
 
 
 @pytest.mark.smoke
 def test_query_am_subordinate_svs(graph_with_seed):
-    """○○ AM の配下 SV (snapshot A では 見本SV一郎 1 名)。"""
+    """中田 AM の配下 SV (snapshot A では 鈴木和典 1 名)。"""
     mod, _ = graph_with_seed
     g_a = mod.load_snapshot("2026-04-01")
-    svs = mod.query_am_subordinate_svs(g_a, "見本AM二郎")
-    assert svs == {"見本SV一郎"}
+    svs = mod.query_am_subordinate_svs(g_a, "中田将也")
+    assert svs == {"鈴木和典"}
 
 
 @pytest.mark.smoke
@@ -150,15 +150,15 @@ def test_list_snapshots_returns_sorted(graph_with_seed):
 
 @pytest.mark.smoke
 def test_query_sv_am_history(graph_with_seed):
-    """SV の AM 履歴。見本SV一郎 SV は ある時 中田、別の時 渡邉。"""
+    """SV の AM 履歴。鈴木和典 SV は ある時 中田、別の時 渡邉。"""
     mod, _ = graph_with_seed
     snaps = [mod.load_snapshot("2026-04-01"), mod.load_snapshot("2026-05-19")]
-    history = mod.query_sv_am_history(snaps, "見本SV一郎")
+    history = mod.query_sv_am_history(snaps, "鈴木和典")
     # 順序依存だが少なくとも 1 entry はある
     assert len(history) >= 1
     am_names = [h["am"] for h in history]
     # AM が変わったなら 2 entry になる、変わらないなら 1 entry
-    assert all(am in ("見本AM二郎", "見本AM三郎", None) for am in am_names)
+    assert all(am in ("中田将也", "渡邉俊也", None) for am in am_names)
 
 
 @pytest.mark.smoke

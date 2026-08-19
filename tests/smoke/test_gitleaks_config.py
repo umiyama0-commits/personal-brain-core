@@ -1,6 +1,6 @@
 """smoke test: gitleaks config (★2026-05-23 LEE §4.1)。
 
-pre-commit + .gitleaks.toml が正しく設定され、PB 固有 pattern (社内 password / sk-litellm)
+pre-commit + .gitleaks.toml が正しく設定され、PB 固有 pattern (Owndays / sk-litellm)
 を block する事を確認。gitleaks 自体は CI で動くため、ここは config 構造の sanity check。
 """
 from __future__ import annotations
@@ -38,7 +38,7 @@ def test_gitleaks_detects_owndays_pattern():
     """OWNDAYS password pattern が rule に含まれている。"""
     cfg = (REPO / ".gitleaks.toml").read_text(encoding="utf-8")
     assert "owndays-mobile-password" in cfg
-    assert "owndays-mobile-password" in cfg  # rule id 存在 (regex 本文は会社固有形式を非開示)
+    assert "Owndays[0-9]{3,}" in cfg
 
 
 @pytest.mark.smoke
@@ -80,7 +80,7 @@ def test_no_secret_in_main_branch_now():
     files = [f for f in out.stdout.splitlines() if f and not f.startswith("data/")]
     # 検出 pattern
     bad_patterns = [
-        re.compile(r"mobilepass\s*[:=]\s*[A-Za-z0-9]{6,}", re.I),
+        re.compile(r"Owndays[0-9]{3,}"),
         re.compile(r"sk-litellm-brain-[0-9]"),
         re.compile(r'LOGIN_PASS\s*=\s*"[^"]+"'),
     ]

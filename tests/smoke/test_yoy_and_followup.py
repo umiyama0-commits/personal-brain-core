@@ -1,20 +1,19 @@
 """tests/smoke/test_yoy_and_followup.py
+(★2026-07-20 海山「日本の昨日が出ない」+「昨年対比 全店/既存店/客数/客単価も見れるように」)。
 
-YoY (year-over-year) 注入 + 売上フォローアップの単体テスト。
-
-1. YoY (yoy_inject): 既存店=公式 MTD まとめ / 全店=完了月 monthly.json、日次自前 YoY は作らない。
-2. フォローアップ (business_intent.is_business_followup + daily_history_inject 国名認識):
+1. YoY (yoy_inject): 既存店=Monday Dash 公式 / 全店=完了月 monthly.json、日次自前 YoY は作らない。
+2. フォローアップ (business_intent.is_business_followup + daily_history_inject 日本認識):
    「日本の」型が売上会話の継続として拾われ nation データが注入される。
-
-注: 本ファイルの売上・客数の数値はすべてダミー (公開用サニタイズ済み)。検証しているのは
-    比率計算・分岐ロジックであり、実売上ではない。
 """
 from __future__ import annotations
 
 import json
 from datetime import date
+from pathlib import Path
 
 import pytest
+
+_ROOT = Path(__file__).resolve().parents[2]
 
 
 # ─── YoY ───
@@ -26,11 +25,11 @@ def _yoy_dirs(tmp_path):
     (kd / "owndays-monday-dash-latest.md").write_text(
         "---\nupdated: 2026-07-19\n---\n# Monday Dash\n\n### ★ MTD まとめ (= 既存店前年比 月次 canonical)\n\n"
         "**月間累計 (19日まで、全店)**\n"
-        "- **全店売上**: **1,200,000,000円** (店舗予算比 **95%**)\n"
+        "- **全店売上**: **888,111,222円** (店舗予算比 **95%**)\n"
         "- **★ 既存店前年比 (曜日対比)**: 売上 **121%** / 客数 **110%** / 客単価 **111%**\n"
         "- **★ 既存店前年比 (同日対比)**: 売上 **123%** / 客数 **112%** / 客単価 **110%**\n\n"
         "**直近単日 (7月19日、全店)**\n"
-        "- 全店売上: 95,000,000円\n"
+        "- 全店売上: 91,103,786円\n"
         "- 既存店前年比 曜日対比: 売上 134% / 客数 135% / 客単価 99%\n\n"
         "**注**: これは無視される行 おはようございます OWNDAYS NET 生ログ\n",
         encoding="utf-8")
@@ -38,9 +37,9 @@ def _yoy_dirs(tmp_path):
     imp.mkdir()
     (imp / "monthly.json").write_text(json.dumps({
         "2026-06": {"start": "2026-06-01", "end": "2026-06-30",
-                    "total": {"JPYAmount": "5800000000", "CustomerCount": 265000}},
+                    "total": {"JPYAmount": "4845824605", "CustomerCount": 270593}},
         "2025-06": {"start": "2025-06-01", "end": "2025-06-30",
-                    "total": {"JPYAmount": "5000000000", "CustomerCount": 250000}},
+                    "total": {"JPYAmount": "4176049945", "CustomerCount": 254640}},
         # partial 月 (end が月末でない = 取込途中) — 完了扱いしてはいけない
         "2026-05": {"start": "2026-05-01", "end": "2026-05-18",
                     "total": {"JPYAmount": "1000000000", "CustomerCount": 60000}},
@@ -74,7 +73,7 @@ def test_yoy_allstore_completed_month(_yoy_dirs):
     imp, kd = _yoy_dirs
     out = build_yoy_context("6月の全店前年比", today=date(2026, 7, 20), import_dir=imp, knowledge_dir=kd)
     assert "全店 前年比 (月次・完了月 2026-06" in out
-    assert "売上 116%" in out and "客数 106%" in out  # 5800000000/5000000000=116%, 265000/250000=106%
+    assert "売上 116%" in out and "客数 106%" in out  # 4845824605/4176049945=116%, 270593/254640=106%
 
 
 def test_yoy_current_month_no_allstore(_yoy_dirs):
@@ -125,7 +124,7 @@ def test_yoy_non_intent_returns_none(_yoy_dirs):
 
 @pytest.fixture()
 def _storelist_dir(tmp_path):
-    """単日・店舗別 JSON (当日 Amount + 前年 yAmount + DollarRate)。数値はダミー。"""
+    """単日・店舗別 JSON (当日 Amount + 前年 yAmount + DollarRate)。"""
     d = tmp_path / "import"
     d.mkdir()
     rows = [
@@ -237,18 +236,17 @@ def test_sales_scope_default_japan():
 
 
 def _write_trend_fixture(d):
-    """実 areatotal JSON は AreaName にエリア接尾 (中部エリア 等)、rollup 合算行 (関東エリア=当年0) も
-    併存。数値はダミー (公開用サニタイズ済み)。"""
+    """実 areatotal JSON は AreaName にエリア接尾 (中部エリア 等)、rollup 合算行 (関東エリア=当年0) も併存。"""
     import json as _j
     (d / "owndays_mobile_api_nationtotal_2026-07-19.json").write_text(_j.dumps([
-        {"NationName": "日本", "Amount": "99000000", "yAmount": 100000000},
+        {"NationName": "日本", "Amount": "124054171", "yAmount": 125302771},
         {"NationName": "台湾", "Amount": "30000000", "yAmount": 28000000},
     ]), encoding="utf-8")
     (d / "owndays_mobile_api_areatotal_2026-07-19.json").write_text(_j.dumps([
-        {"AreaName": "中部エリア", "Amount": "10200000", "yAmount": 10000000},
-        {"AreaName": "沖縄エリア", "Amount": "8100000", "yAmount": 10000000},
+        {"AreaName": "中部エリア", "Amount": "15187117", "yAmount": 14867644},
+        {"AreaName": "沖縄エリア", "Amount": "7583093", "yAmount": 9356443},
         {"AreaName": "関東エリア", "Amount": "0", "yAmount": 40000000},   # ★rollup 合算 (当年0) = 除外
-        {"AreaName": "TH West", "Amount": "50000", "yAmount": 100000},    # 海外 = 除外
+        {"AreaName": "TH West", "Amount": "31636", "yAmount": 111002},    # 海外 = 除外
     ]), encoding="utf-8")
 
 
@@ -266,7 +264,7 @@ def test_japan_trend_block(tmp_path):
     # ★母集団 (全店ベース) と既存店との区別を明示
     assert "全店ベース" in out and "既存店" in out
     # 前年比%のみ (raw 前年円は出さない = guard 誤検知回避)
-    assert "100,000,000" not in out
+    assert "125,302,771" not in out
 
 
 def test_japan_trend_not_for_allco_or_today_or_othernation(tmp_path):
@@ -324,3 +322,18 @@ def test_followup_dimension_not_shadowed():
     dp = extract_date_phrase("昨日の業態別売上")  # → 昨日
     effective = f"{dp} 日本の売上"  # 今回の次元(国別)を優先
     assert detect_dimension(effective) == ("nation", ["日本"])  # 業態でなく国別
+
+
+def test_followup_wired_in_main():
+    src = (_ROOT / "main.py").read_text(encoding="utf-8")
+    assert "_is_business_followup" in src
+    assert "_biz_follow" in src
+    i = src.index("_biz_follow")
+    seg = src[i:i + 900]
+    # 前クエリの日付だけ引き継ぎ、次元は今回優先 (シャドウ防止)
+    assert "extract_date_phrase" in seg and "history=messages" in seg
+
+
+def test_yoy_wired_in_clone():
+    src = (_ROOT / "brain_wiki.py").read_text(encoding="utf-8")
+    assert "build_yoy_context" in src and "yoy_inject" in src

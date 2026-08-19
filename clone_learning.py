@@ -561,6 +561,22 @@ def detail(fid: str) -> str:
 
 
 # ─── ★応答品質の自動評価 (2026-05-07 追加、自己改善ループ) ─────────────
+def _pick_judge() -> str:
+    """本番 bot と別系列の judge alias (§1.15 self-eval loop 遮断)。
+    共通実装 scripts/clone_improve_lib.pick_cross_family_judge に委譲、失敗時は安全側。"""
+    try:
+        import sys as _s
+        from pathlib import Path as _P
+        _r = str(_P(__file__).resolve().parent / "scripts")
+        if _r not in _s.path:
+            _s.path.insert(0, _r)
+        from clone_improve_lib import pick_cross_family_judge
+        return pick_cross_family_judge()
+    except Exception:
+        # bot 本番既定は smart-gpt (OpenAI) なので、判定不能時は Claude 側に倒す
+        return "smart"
+
+
 async def extract_response_quality_issues(
     http: httpx.AsyncClient,
     litellm_url: str,
@@ -679,7 +695,7 @@ async def run_scan(
     brain,  # BrainWiki instance (for wiki snippets)
     model: str = "fast-gpt",
     max_users: int = 50,
-    quality_model: str = "smart-gpt",  # ★2026-06-07 評価: bot=smart(Opus) 応答を採点するので別系列 GPT-5.4 で self-eval loop 遮断 (§4)
+    quality_model: str = "",  # 空なら pick_cross_family_judge で本番 bot と別系列を自動選択
 ) -> int:
     """全ユーザの新メッセージを走査し insight を抽出・保存。返り値: 保存件数
 
@@ -725,10 +741,15 @@ async def run_scan(
             failed_users += 1
             continue
 
-        # ★応答品質も並行評価 (smart で深い分析)
+        # ★応答品質も並行評価
+        # ★2026-08-03 self-eval 修正: 既定を "smart-gpt" 固定にしていたが、本番 bot が
+        # CLONE_PUBLIC_PROD_MODEL=smart-gpt (GPT-5.4) に変わったことで **judge と bot が同一
+        # provider** になっていた (2026-06-07 のコメントは bot=Opus 時代の前提のまま陳腐化)。
+        # 同日直した clone_style_regression と同じく pick_cross_family_judge で自動選択する。
         try:
+            _qm = quality_model or _pick_judge()
             quality_issues = await extract_response_quality_issues(
-                http, litellm_url, litellm_key, msgs, model=quality_model
+                http, litellm_url, litellm_key, msgs, model=_qm
             )
         except Exception as e:
             logger.warning(f"response_quality eval failed: {e}")

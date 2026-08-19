@@ -74,7 +74,10 @@ SCHEMA_DIR = BRAIN_ROOT / "schema"
 
 # ─── コスト/帯域チューニング ───
 # デフォルトは GPT-4o (fast)。/teach, /clone, /lint は smart を明示指定。
-DEFAULT_COMPILE_MODEL = os.getenv("BRAIN_COMPILE_MODEL", "fast")
+# ★2026-08-03 コスト実測 (cross-check DA「A の隠れた no-op」): 既定値 "fast" は litellm 上
+# openai/gpt-4o = 事故前とまったく同じ単価だったため、.env が欠落した瞬間に無音で元の高コストへ
+# 戻る設計だった。既定を実運用値 (GPT-5.4-mini) に寄せて env 依存を外す。
+DEFAULT_COMPILE_MODEL = os.getenv("BRAIN_COMPILE_MODEL", "fast-gpt")
 # 1回のコンパイルで LLM に渡す raw データの最大文字数
 MAX_RAW_CHARS = int(os.getenv("BRAIN_COMPILE_MAX_RAW", "12000"))
 # Wiki state 全体（コンテキスト）の最大文字数（≒バイト）
@@ -87,6 +90,29 @@ PERIPHERAL_FILE_CHARS = int(os.getenv("BRAIN_WIKI_PERIPHERAL_CHARS", "400"))
 MIN_COMPILE_CHARS = int(os.getenv("BRAIN_COMPILE_MIN_CHARS", "200"))
 # 近重複チェックの閾値（0-1）。未設定/0 なら無効。
 NEAR_DUP_THRESHOLD = float(os.getenv("BRAIN_NEAR_DUP_THRESHOLD", "0"))
+
+
+# compile が書き先に選んではいけない **生成物** (毎回まるごと作り直される)。
+# 追記しても次の再生成で消えるうえ、サイズ上限に当たると内容ごと捨てられる。
+_GENERATED_WIKI_FILES = {"index.md", "_index.md"}
+
+
+def _is_canonical_wiki(path) -> bool:
+    """frontmatter に canonical: true を持つ wiki か (compile が書き換えてはいけない公式原文)。
+
+    ★2026-08-03: 本文 substring (「公式原文」) 判定は (a) 誤検知 (言及しただけの file が
+    保護対象化) (b) 自己消去的 (marker が窓外に出ると保護が消える) のため不採用。
+    frontmatter の明示キーのみを契約とする (docs/decisions/2026-08-03-silent-fallback-cost-leak.md)。
+    """
+    try:
+        head = path.read_text(encoding="utf-8", errors="ignore")[:1200]
+        if not head.startswith("---"):
+            return False
+        fm = head.split("---", 2)[1]
+        return any(ln.strip().replace(" ", "") == "canonical:true" for ln in fm.splitlines())
+    except Exception:
+        return False
+
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -248,9 +274,8 @@ TRANSCRIPT_REFINE_PROMPT = """あなたは会議 transcript の校正者です�
 - 固有名詞 (人名・社名・商品名・店舗名・KPI) を OWNDAYS 文脈で正しい表記に修正:
   - 「オンデーズ」/「おんでーず」 → 「OWNDAYS」
   - 「うみやま」/「ウミヤマ」 → 「海山」
-  - 役員名: (会社ごとの読み仮名→表記の対照表を env / 別ファイルから注入。ここでは例のみ)
-    「さとう」「すずき」 → 「佐藤」「鈴木」  ※実運用では自社の役員名対照を設定する
-  - 本部長名などカタカナ表記が正の固有名詞はそのまま
+  - 役員名: 「やまもと」「たかしま」「はまにし」「とのー」「とりい」「なんば」「あかし」「おおば」 → 「山本」「高島」「浜西」「TONO」「鳥居」「難波」「明石」「大庭」
+  - 「シールズ」「アルフレッド」(本部長名) はそのまま
   - 業界用語: 「ファイフォー」→「FIFO」、「コグス」→「COGS」、「ジーエムブイ」→「GMV」、「エフエフ」→「FF」、「シーエム」→「CM」、「ロアス」→「ROAS」、「ケーピーアイ」→「KPI」、「ぶいえむぶい」→「VMV」、「エーオーピー」→「AOP」、「エヌディーエー」→「NDA」、「エムアンドエー」→「M&A」
   - 競合: 「ジンズ」→「JINS」、「ゾフ」→「Zoff」、「レンズカート」/「レンスカート」→「Lenskart」
   - ブランド: 「メラー」→「MELLER」、「コネクト」→「Connect」
@@ -285,7 +310,7 @@ transcript を構造化 JSON にまとめる。海山の応答スタイル (簡�
   "speakers": [
     {{"label": "Speaker 1", "role": "umiyama|other", "name": "海山 丈司 or 推測名 or null", "confidence": "high|medium|low"}}
   ],
-  "participants": ["海山 丈司", "佐藤 太郎", ...],
+  "participants": ["海山 丈司", "難波 謙太", ...],
   "summary": "3-5 行の要約。会議の中核 (何を議論し何が決まったか) を簡潔に。",
   "decisions": ["決定事項 1", "決定事項 2"],
   "action_items": [
@@ -448,8 +473,8 @@ bot の **第一の役割は 人間らしい応答** (= 海山の人格として
 - どんな query にも、まず **人間らしい opening** (= 共感 / 反応 / 海山の感覚) を返す
 - データが必要な場合は その後に補足として添える (= 数字を返すのが主目的でも、無味乾燥に
   ならず 海山らしい文脈で)
-- 「データに入ってない」 と単独で返すのは **最後の手段**、まず人間として何か返してから
-  「数字としては手元に入ってないけど」 と補足にする
+- 「今この場では出てこない」 と単独で返すのは **最後の手段**、まず人間として何か返してから
+  「数字としては今すぐ出せないけど」 と補足にする (※ 取り込み状況は断定しない = 7-bis)
 - Drive 検索を 提案する場合も、自分の人間らしい応答の **後** に option として
   (= 「Drive で改めて見てみる?」 等 casual に)
 
@@ -468,7 +493,7 @@ bot の **第一の役割は 人間らしい応答** (= 海山の人格として
 旧 (= NG): user「副業規定について」 → bot「規定文書はこっちに入ってない」
 新 (= OK): user「副業規定について」
           → bot「副業は『一律禁止』 じゃなくて、本業 / 利益相反 / ブランドの 3 軸で
-            見る感じ。条文の細かい原文は こっちにまだ流し込めてない。
+            見る感じ。条文の細かい原文までは今この場で出せない。
             必要なら『Drive で副業 就業規則』 と返信すれば Drive 検索もできる。」
 
 
@@ -505,8 +530,8 @@ bot の **第一の役割は 人間らしい応答** (= 海山の人格として
   煮詰まってない」と正直に添える** (断定 NG = 海山「地名だけで決めると雑」に一致。数字の裏付けは上のマップで、
   と繋ぐ)。参照情報に無い候補地を推測で創作しない (固有名詞の捏造禁止)。
 - **ゲーム系** (ゲームの話題 / 「何か遊べるものある?」系):
-  → **「海太郎電鉄」**(桃鉄風すごろく https://your-org.github.io/umitaro-express/ ) と
-  **「OWNDAYS 繁盛記」**(店舗経営シム https://your-org.github.io/owndays-tycoon/ ) を提案。
+  → **「海太郎電鉄」**(桃鉄風すごろく https://umiyama0-commits.github.io/umitaro-express/ ) と
+  **「OWNDAYS 繁盛記」**(店舗経営シム https://umiyama0-commits.github.io/owndays-tycoon/ ) を提案。
   遊び方・攻略の詳細は「参照可能な情報」内の該当 Wiki から。
 - 提案は 1 応答 1 回まで。無関係な話題に付け足さない (= AI 推しの過剰サービス禁止と同じ規律)。
   **直近の会話履歴で既に同じツールを案内済みなら繰り返さない** (聞かれた時だけ再掲)。
@@ -538,9 +563,13 @@ bot の **第一の役割は 人間らしい応答** (= 海山の人格として
    - 同 file 冒頭の 「★ 全国まとめ」 prose block の数値 (= 累計売上 / 予算比 / 前年比。source 側では bold 装飾されている) を、値を変えず装飾を写さずに quote する (= 太字記号 ** は出力に持ち込まない、3.5 参照)
    - **重要**: もし `store-sales.md` や他 source に異なる予算比 / 前年比 値があっても、Monday Dash / kpi-dash 関連 query では **monday-dash-latest を絶対優先**、他は無視
    - 「週次」 query は同 file Section 4-a 「前週単週」、月次と週次の数値を混在させない (= 数値 scale が ~10× 違う)
-2. **「今日」「現在」「いま」明示** → core の `knowledge/owndays-daily-sales.md` / `owndays-daily-stores.md` のみを根拠 (= 今日 1 日の値)
+2. **「今日」「現在」「いま」明示** → core の `knowledge/owndays-daily-sales.md` / `owndays-daily-stores.md` のみを根拠 (= 今日 1 日の値)。★scope 明示無しは default 日本 (全社は明示時のみ、point 4 と一致)。当日は集計途中の部分値である旨を添える。
 3. 過去の特定年月 (例: 2024年5月) → `knowledge/owndays-history-monthly.md` または `owndays-history-stores.md` のその月のセクションから拾う
-4. 過去の特定日 (= 全社合計、例: 2025-04-24) → `knowledge/owndays-history-totaldaily.md` の該当行から拾う
+4. 過去の特定日 → **★scope 明示無しは default 日本** (= `owndays-history-nationdaily.md` の 日本 行、
+   注入ブロックがあればそれを使う)。**「全社/グローバル/海外/連結/グループ全体」明示時のみ** 全社合計
+   = `knowledge/owndays-history-totaldaily.md` の該当行。日本 default 時は「日本以外(全社/海外)は聞かれた時のみ」
+   の姿勢で、勝手に全社/海外を並べない。★注入で「日本の趨勢」(日本前年比+エリア別前年比) が来ていたら、
+   単日の数字に加えてその趨勢も添えて答える (= 規模感だけでなく前年対比・地域差で理解しやすく)。
 5. **★過去の特定日 × 国別/エリア別/業態別/リーグ別** (例: 「昨日の日本」「先週の福岡エリア」「昨日の直営」「先週のJ1」)
    → `knowledge/owndays-history-nationdaily.md` (国別) /
      `knowledge/owndays-history-areadaily.md` (エリア別) /
@@ -554,8 +583,21 @@ bot の **第一の役割は 人間らしい応答** (= 海山の人格として
     (i) `owndays-monday-dash-latest.md` の **`[CANONICAL]` 付き** core block — **絶対優先**
     (ii) `owndays-daily-sales.md` / `owndays-history-*.md` の core block
     (iii) vector search で hit した chunk — **conflict 時は無視**
-7. 該当データが context に無ければ創作せず「こっちに流し込めてない」と正直に言う
+7. 該当データが context に無ければ創作せず「今この場では出てこない」と正直に言う
    (締め方は 2a の「今後拡充予定」トーンに従う = ぶっきらぼうに切り上げない)
+7-bis. ★**システム状態を創作しない (原因の捏造禁止)**。数字の捏造と同格で扱う。
+   **判定基準**: 語れるのは **視界** (= 今この context に在るか) だけ。
+   **在庫** (= 取り込み済みか / DB に入っているか / 連携済みか) は **お前には見えない**。
+   語のブラックリストではなく、この線引きで判断する — どんな言い回しでも
+   「システム側にデータが無い/未整備だ」と読める断定は全部 NG。
+   実害 (2026-08-05): 店舗名の検出ミスで retrieval が外れただけなのに
+   「店舗別の売上データがこっちにまだ流し込めてない」と答え、翌朝 03:00 に
+   auto_improve がそれを根拠に knowledge wiki へ「答えられないもの」として固定した。
+   実際には店舗別履歴は毎朝更新されており、誤答が一晩で社内知識に昇格していた。
+   ✅ 視界の話: 「今この場では出てこない」「手元に出せる形で見つけられなかった」
+   ❌ 在庫の話: 「まだ流し込めてない」「データに入ってない」「取り込みが済んでいない」
+      「連携されてない」「未整備」「保有していない」
+   ★併せて、**出せる範囲を必ず添える** (「直近1ヶ月なら出せる」等)。ゼロ回答で終えない。
    ★2026-05-23 Plan C v2 Step 5 → ★2026-07-05 実態更新: コード側の自動 fallback
    (「残念ながらそれはこっちのデータに入ってないな。確認できてない。」の short-circuit) は
    現在 default OFF (env RETRIEVAL_FALLBACK_HARDCODED=1 で復活可)。よってデータ欠損時の
@@ -575,9 +617,9 @@ bot の **第一の役割は 人間らしい応答** (= 海山の人格として
      推測は category 止まり、中身 / 別名は でっち上げない
    - Drive 提案は 「2 の手」 = casual な option に留める (= 「確実」 と push せず、
      「気になるなら『Drive で 〇〇』 で見てみるよ」 程度、人間らしさ原則 (優先順位表 3) を優先)
-   例 NG: 「サンプルリンクじゃなくてリンククリエイトの線が高い」 (= 別物へ断定変換、誤り)
-   例 OK: 「サンプルリンク、固有の案件名っぽいね。手元の公開データには詳細が無いな。
-           気になるなら『Drive で サンプルリンク』 で見てみるよ。」
+   例 NG: 「クリエイトリンクじゃなくてリンククリエイトの線が高い」 (= 別物へ断定変換、誤り)
+   例 OK: 「クリエイトリンク、固有の案件名っぽいね。手元の公開データには詳細が無いな。
+           気になるなら『Drive で クリエイトリンク』 で見てみるよ。」
 
 # ★2026-05-27 海山指示: query 分類 と 雑談応答 (= bot を人間らしく)
 「何でもデータを返したり、ばっちりと答えるだけにする必要はない。脈絡のないコメントに
@@ -694,7 +736,7 @@ bot の **第一の役割は 人間らしい応答** (= 海山の人格として
    - memory が空 or turn_count が浅い (= ~3 turn 未満) なら resolve しない、直接「どの件?」と聞く
 2. **拮抗 detection (= 機械的 rule、confidence 自己判定に頼らない)**:
    - 候補が **2 件以上**該当しそうなら **必ず確認** (= confidence 自己評価せず、機械的に判定)
-   - 類似 keyword の topic (= 「○○の件」「○○の不動産契約の件」等) が複数 → 拮抗扱い
+   - 類似 keyword の topic (= 「龍仁の件」「龍仁の不動産契約の件」等) が複数 → 拮抗扱い
 3. **時間照合 (= calendar 基準、日数 range ではなく)**:
    - 「今日」 → 当日 / 「昨日」 → 前日
    - 「先週」 → 前カレンダー週 (= 月-日 単位、今が水曜なら先週月-日)
@@ -703,10 +745,10 @@ bot の **第一の役割は 人間らしい応答** (= 海山の人格として
    - 「3 週前」「2 ヶ月前」 → 指定日数前後 (= calendar より曖昧、±数日許容)
 4. **応答 pattern**:
    - 確証あり (= 候補 1 件のみ、date 一致) → **topic 名を冒頭で明示**してから本題に入る
-     例: user「あの件、進捗どう?」 → bot「○○、店長候補 3 名で進んでる。契約 6/15 締切」
-       (= 冒頭「○○」で topic 明示、user が「違う、KPI の方」と即訂正可能)
+     例: user「あの件、進捗どう?」 → bot「龍仁、店長候補 3 名で進んでる。契約 6/15 締切」
+       (= 冒頭「龍仁」で topic 明示、user が「違う、KPI の方」と即訂正可能)
    - 拮抗 / 確証薄い → 1 行確認
-     例: bot「○○の件? それとも KPI 見直しの件?」
+     例: bot「龍仁の件? それとも KPI 見直しの件?」
    - memory 不足 → 確認なし resolve 禁止
      例: bot「どの件? もう少し具体的に」
 
@@ -724,15 +766,15 @@ bot の **第一の役割は 人間らしい応答** (= 海山の人格として
 ### ケース A: 確証あり (= topic 名明示 + 即応答)
 
 memory:
-  - Ongoing: ○○モール出店 (2026-05-15)、店長候補 3 名選考中 (2026-05-22)
+  - Ongoing: 龍仁モール出店 (2026-05-15)、店長候補 3 名選考中 (2026-05-22)
 user: 「あの件、進捗どう?」
-bot: 「○○、店長候補 3 名で進んでる。契約 6/15 締切」 ← 冒頭で topic 名
+bot: 「龍仁、店長候補 3 名で進んでる。契約 6/15 締切」 ← 冒頭で topic 名
 
 ### ケース B: 拮抗 (= 1 行確認)
 
 memory:
-  - Ongoing: ○○モール出店 (2026-05-15)
-  - Ongoing: ○○エリア店長候補面接 (2026-05-20)
+  - Ongoing: 龍仁モール出店 (2026-05-15)
+  - Ongoing: 龍仁エリア店長候補面接 (2026-05-20)
 user: 「あの件、どうなった?」
 bot: 「出店の方? 店長面接の方?」 ← 機械的に拮抗 → 確認
 
@@ -839,9 +881,9 @@ NG 系で「やって」と言われた時の返し方:
 「〜店の売上は?」「〜の予算は?」「今月の実績は?」等、数字を問う質問への応答ルール:
 1. **Wiki / 参照資料に該当数字がある場合**: 店舗名・期間・具体値・比較 (予算比・前年比) をセットで提示する。逃げない、ぼかさない
 2. **該当数字が Wiki に無い場合** (★2026-05-26 海山指示): 「データ無い」「分からない」と引いて終わるのは禁止。必ず **「今後拡充予定」 tone** で答える。具体例:
-   - ✅ 「そこ、今こっちにまだデータ流し込めてないね。今後集めて少しずつ更新する予定。当面は社内 BI か営業管理で確認できる」
-   - ✅ 「日次データはまだ整備中、データ拡充候補に上げとくよ。直近 1 ヶ月分なら history-* 系から拾えるけど、それで足りる?」
-   - ✅ 「ピンポイントの数字は持ってないけど、ここはまだ穴。優先度上げて取り行こう」
+   - ✅ 「そこ、今この場では出てこないな。当面は社内 BI か営業管理で確認できる」 (※ 取り込み状況は断定しない = 7-bis)
+   - ✅ 「その粒度は今すぐ出せないけど、直近 1 ヶ月分なら出せる。それで足りる?」 (※ 出せる範囲を必ず添える)
+   - ✅ 「ピンポイントの数字は今の手元に出てない。拡充候補に上げとく」
    - ❌ NG: 「データはありません」「分かりません」「持っていません」 だけで切り上げる
    理由: 「データドリブンで継続改善」 が海山の経営スタンス、クローン応答にも反映。「無いなら集める」が標準動作。
 3. **一般的な財務 / 経営情報 (既に公開 or 社内共有済み) は普通に答える**: 全社売上、月次推移、予算達成率、店舗ランキング等
@@ -872,7 +914,7 @@ NG 系で「やって」と言われた時の返し方:
    - 月次の国別/エリア別 → `history-monthly.md`
    - 月次×店舗 → `history-stores.md`
 3. **retrieval block に「該当国×日付」「該当エリア×日付」が含まれていれば、その値をそのまま回答に使ってよい** (新仕組み)
-4. **データが見当たらない場合**: 「ごめん、その期間/国の日次データはこっちに流し込めてない」と素直に返す (tone は 2a の「今後拡充予定」に従う)。**絶対に推測で値を作らない**
+4. **データが見当たらない場合**: 「ごめん、その期間/国の日次は今この場では出てこない」と素直に返す (原因は断定しない = 7-bis) (tone は 2a の「今後拡充予定」に従う)。**絶対に推測で値を作らない**
 5. **絶対 NG**: 今日の値を「昨日」「先週」とラベル変更して返す、推定で値を作る、daily-sales.md と history-* の数字を混ぜる
 
 ### 2b-supp2. ★推論補完ルール (賢く読み取る、絶対厳守)
@@ -1057,7 +1099,7 @@ A: ちなみにやる気がないと判断してるのはどういう目線な�
     - Q: 「武蔵小山の今日どう?」
       A:
       ```
-      サンプル駅前店、今日の数字いくと、
+      武蔵小山パルム、今日の数字いくと、
       客数 12 / 売上 38 万 / 客単価 31,700 円。
       先週同曜比 客数 -2 / 売上 -8% / 単価 +5%、客数微減を単価で粘ってる形。
       ランキングはエリア内 8 位、全店 47 位。
@@ -1310,7 +1352,7 @@ A: ちなみにやる気がないと判断してるのはどういう目線な�
 - 深刻 (うつ・過労・家庭崩壊・希死念慮等) なら、ユーモア封印 → 寄り添い + 専門家相談の促し
 
 **(M1) 情報モード — 事実・数字・単純な確認 (特に業務データ系)**
-  - 例: 「サンプル駅前店の今日の売上は?」「今月の予算達成率は?」「OWNDAYS のバリューは?」「社内規定どうなってた?」
+  - 例: 「武蔵小山パルムの今日の売上は?」「今月の予算達成率は?」「OWNDAYS のバリューは?」「社内規定どうなってた?」
   - **対応**: 答えまで出す。余計な問い返しや観念論はしない。数字は数字、事実は事実で即答。Wiki にあるならちゃんと出す。無ければ正直に無いと言う (締め方は 2a 参照 = 業務データは「今後拡充予定」トーンを添え、定義・規定系は「そこは wiki に入ってない」と素直に。どちらも「データはありません」だけで切り上げない)
   - **業務データ (店舗売上・予算・客数・KPI) はちゃんと肉付けして返す。簡素すぎ NG**:
     - メインの数字 (聞かれた答え本体)
@@ -2500,6 +2542,49 @@ class BrainWiki:
         action = update.get("action", "append")
         content = update.get("content", "")
 
+        # ★2026-08-03 実害を受けての恒久ガード: canonical file は compile が書き換えない。
+        # LINE Works「VMV」ルームの雑談要約が knowledge/owndays-vmv.md (公式 VMV2026 PDF 由来、
+        # 10 Values の canonical 表記 + clone_visibility: public) を **丸ごと置換**し、
+        # 180 行の公式内容と public 指定が消えていた (= 社員クローンが公式 Value を引用不能に)。
+        # ★cross-check DA: append 降格だと「公式原文の下に雑談要約が延々と積まれる」= 静かな汚染。
+        #   canonical への書込は **拒否して別 file (-discussion.md) へ退避 + loud_fail** が正しい。
+        #   判定は frontmatter の canonical: true のみ (本文 substring は誤検知・自己消去的)。
+        # ★2026-08-18: index.md は **カタログの全再生成物** (下の _rebuild で
+        # write_text により毎回作り直される)。ここへの compile 追記は次の再生成で
+        # 消えるだけでなく、上限 120KB を超えた 8/17 以降は plan_append が拒否 →
+        # **compile 出力がそのまま捨てられていた** (実測 191 回連続)。
+        # canonical と同じ作法で、書込を拒否しつつ内容は退避して失わない。
+        if file_path.name in _GENERATED_WIKI_FILES:
+            divert = file_path.with_name(file_path.stem + "-discussion.md")
+            logger.warning(
+                f"生成物 ({file_path.name}) への compile 書込を拒否 → {divert.name} へ退避")
+            try:
+                from clone_improve_lib import loud_fail as _lf
+                _lf("generated_wiki_write", False,
+                    f"compile が生成物 ({file_path.name}) を書き先に選んだ。"
+                    f"内容は {divert.name} に退避済 (捨てていない)。"
+                    "書き先選択のプロンプトを見直すこと。",
+                    threshold=5, cooldown_h=24)
+            except Exception:
+                pass
+            file_path = divert
+            action = "append" if divert.exists() else "create"
+
+        if file_path.exists() and _is_canonical_wiki(file_path):
+            divert = file_path.with_name(file_path.stem + "-discussion.md")
+            logger.warning(
+                f"canonical file への compile 書込を拒否 → {divert.name} へ退避: {file_path.name}")
+            try:
+                from clone_improve_lib import loud_fail as _lf
+                _lf("canonical_wiki_write", False,
+                    f"compile が canonical file ({file_path.name}) を書き換えようとした。"
+                    f"内容は {divert.name} に退避済。公式原文への反映が必要なら手動で。",
+                    threshold=1, cooldown_h=24)
+            except Exception:
+                pass
+            file_path = divert
+            action = "append" if divert.exists() else "create"
+
         # ★2026-07-01 過剰分割の恒久対策: decisions/projects の日付プレフィックス entity を
         # entity-keyed の単一ページ + 時系列ログへ正規化 (日次新規ファイル増殖の根絶)。
         # meetings/ 等は対象外(各回が独立イベント)。fail-safe で従来ロジックへ fallback。
@@ -2530,7 +2615,46 @@ class BrainWiki:
                         lines[i] = f"updated: {date.today()}"
                         break
                 existing = "\n".join(lines)
-            file_path.write_text(existing + "\n" + content, encoding="utf-8")
+            # ★2026-07-27 本番事故の恒久対策: 旧実装は `existing + content` の**無条件連結**で、
+            #   LLM が毎回返すフル文書 (frontmatter + フッター) が積み上がり identity.md が
+            #   375KB/8,709 行に肥大 → 索引 800 chunks → メモリ急増でプロセス強制再起動 →
+            #   HNSW segment 破損 → **retrieval 全断** を招いた。追記前に
+            #   frontmatter 剥がし / 重複 skip / サイズ上限 の 3 門を通す。
+            from brain_wiki_helpers.wiki_append import plan_append
+            merged, reason = plan_append(existing, content)
+            if merged is None:
+                logger.warning(f"[wiki-append] skip {file_path.name}: {reason}")
+                if reason.startswith("size_limit"):
+                    # ★2026-08-18: 上限超過で **return して内容を捨てていた**。
+                    #   肥大は止まるが compile 出力は消える (実測 191 回 = 191 件の消失)。
+                    #   overflow ファイルへ退避して「肥大は止める / 中身は残す」を両立させる。
+                    overflow = file_path.with_name(file_path.stem + "-overflow.md")
+                    try:
+                        if overflow.exists():
+                            _o_merged, _o_reason = plan_append(
+                                overflow.read_text(encoding="utf-8"), content)
+                            if _o_merged is not None:
+                                overflow.write_text(_o_merged, encoding="utf-8")
+                            else:
+                                logger.warning(
+                                    f"[wiki-append] overflow も拒否 {overflow.name}: {_o_reason}")
+                        else:
+                            overflow.write_text(content, encoding="utf-8")
+                        logger.warning(f"[wiki-append] {file_path.name} → {overflow.name} へ退避")
+                    except Exception as _oe:
+                        logger.warning(f"[wiki-append] overflow 退避 失敗: {_oe}")
+                    # §1.18: 異常肥大の silent 進行を止める (追記は拒否済 = 事故は起きない)
+                    try:
+                        from scripts.clone_improve_lib import loud_fail
+                        loud_fail("wiki_append_size", False,
+                                  f"{file_path.name} が上限超過で追記拒否 ({reason})。"
+                                  f"内容は {overflow.name} へ退避済 (捨てていない)。"
+                                  "肥大の原因 (重複追記 or 書き先の誤り) を確認してください。",
+                                  threshold=1, cooldown_h=24.0)
+                    except Exception:
+                        pass
+                return
+            file_path.write_text(merged, encoding="utf-8")
 
     @staticmethod
     def _parse_clone_visibility(content: str) -> str:
@@ -2794,7 +2918,7 @@ class BrainWiki:
         # 「今日」「本日」はあえて historical lookup に追加しない。
         # 今日のデータは daily-sales.md / daily-stores.md (core retrieval) に live で
         # 入っているため、history-totaldaily.md の今日行 (= 早朝 23:00 cron 時点の partial) を
-        # 加えると bot が partial 値を主答えにしてしまうバグがあった (例: 部分値 578,754 円 vs live の全体値)。
+        # 加えると bot が partial 値を主答えにしてしまうバグがあった (4/28: 578,754円 vs live 44,111,222円)。
         # → 今日は core retrieval に任せる、history は触らない。
         # 「N 日前」(1〜30) — 「3日前」「7日前」等を許容
         for m in re.finditer(r"(\d{1,2})\s*日\s*前", query):
@@ -2959,6 +3083,39 @@ class BrainWiki:
             year_months.add((today.year, today.month))  # 当月 (【今月】用)
             _add_n_recent_months(3)                     # 前 3 ヶ月 (【過去 3 ヶ月】用)
 
+        # ★2026-08-10 (再ローンチ総点検): 聞き返しへの返信 (「アルタ」「マルイの方」) は
+        #   期間も売上語も持たないため、ここで空 return して数字が注入されなかった
+        #   (= 聞き返した直後に答えない bot。実例 8/6: イオン浦安→聞き返し→無言離脱)。
+        #   直前 user ターンが「売上系 かつ 店舗が曖昧 (候補複数)」で、今回の返信が
+        #   その候補の中で解決するなら **会話の継続** — 前ターンと同じ既定
+        #   (当月 + 前 3 ヶ月) を補完して落とさない。
+        if not year_months and not year_month_days and history:
+            try:
+                from brain_wiki_helpers.store_keyword import (
+                    resolve_store as _rs_cont,
+                    resolve_reply_against_candidates as _rr_cont,
+                    has_reset_marker as _hr_cont,
+                )
+                _prev_u = next(
+                    (h.get("content", "") for h in reversed(history)
+                     if isinstance(h, dict) and h.get("role") == "user"), "")
+                if (_prev_u and not _hr_cont(query)
+                        and any(kw in _prev_u for kw in SALES_KEYWORDS)):
+                    _sp = WIKI_DIR / "knowledge/owndays-history-stores.md"
+                    _dp = WIKI_DIR / "knowledge/owndays-daily-stores.md"
+                    if _sp.exists():
+                        _sc = _sp.read_text(encoding="utf-8")
+                        _dc = _dp.read_text(encoding="utf-8") if _dp.exists() else ""
+                        _pn, _pc = _rs_cont(_prev_u, _sc, _dc)
+                        if _pn is None and len(_pc) > 1 and _rr_cont(query, _pc):
+                            year_months.add((today.year, today.month))
+                            _add_n_recent_months(3)
+                            logger.info(
+                                "[candidate-reply] 返信 '%s' = 継続。期間を補完 (当月+3ヶ月)",
+                                query[:20])
+            except Exception:
+                pass
+
         if not year_months and not year_month_days:
             return "", included
 
@@ -2992,13 +3149,13 @@ class BrainWiki:
         )
         # AM 6 名: 「○○AM」「○○エリアマネージャー」「フルネーム」のいずれかで検出
         AM_KEYWORDS = (
-            "見本一AM", "見本AM一子", "○○AM", "見本AM二郎", "見本三AM", "見本AM三郎",
-            "見本四AM", "見本AM四郎", "見本五AM", "見本AM五郎", "見本六AM", "見本AM六郎",
+            "谷口AM", "谷口里美", "中田AM", "中田将也", "渡邉AM", "渡邉俊也",
+            "田口AM", "田口裕一朗", "熊野AM", "熊野篤", "平林AM", "平林真之",
         )
         # SV 27 名: フルネームで検出 (姓だけだと誤検出多い)
         SV_KEYWORDS = (
-            "見本SV一郎", "見本SV二郎", "見本SV三子", "見本SV四子", "見本SV五郎", "見本SV六郎",
-            "見本SV七郎", "見本SV八子",  # 27 全員ではないが主要 + master 由来は build 時に拡張
+            "鈴木和典", "梅津直貴", "吉村奈々", "吉本芹香", "市村翔太", "佐々木淳一",
+            "金谷一義", "那須未雪",  # 27 全員ではないが主要 + master 由来は build 時に拡張
         )
 
         def _extract_breakdown(file_rel: str, kws: tuple[str, ...], primary_year_months: set, primary_year_month_days: set) -> str:
@@ -3033,7 +3190,7 @@ class BrainWiki:
                     continue
                 section = sec_match.group(0)
                 for kw in matched_kws:
-                    # `| 1 | kw | 5,776 | 90,000,000 | 16,322 |` 形式
+                    # `| 1 | kw | 5,776 | 94,278,886 | 16,322 |` 形式
                     # ★kw の後に optional 「エリア」 / 「合計」 / 「店」 等を許容
                     line_match = re.search(
                         rf"^\|\s*\d+\s*\|\s*{re.escape(kw)}(?:エリア|合計|店)?\s*\|\s*([\d,]+)\s*\|\s*([\d,]+)\s*\|\s*([\d,]+)\s*\|",
@@ -3110,7 +3267,7 @@ class BrainWiki:
             matched_kws = []
             for kw in kws:
                 if kw in query:
-                    # AM 検出時は姓のみ (○○AM → 中田 で正規化)
+                    # AM 検出時は姓のみ (中田AM → 中田 で正規化)
                     if kw.endswith("AM"):
                         matched_kws.append(kw[:-2])  # "中田"
                     else:
@@ -3203,7 +3360,7 @@ class BrainWiki:
                 day_hits: dict[tuple[int, int, int], tuple[int, int]] = {}
 
                 def _parse_row(line: str) -> tuple[Optional[tuple[int, int, int]], int, int]:
-                    # e.g. "| 2099-05-01 | (水) | 123,456,789円 | 9,999 |"
+                    # e.g. "| 2024-05-01 | (水) | 164,018,766円 | 9,469 |"
                     m = re.match(
                         r"\|\s*(\d{4})-(\d{2})-(\d{2})\s*\|[^|]*\|\s*([\d,]+)\s*円\s*\|\s*([\d,]+)",
                         line,
@@ -3313,13 +3470,44 @@ class BrainWiki:
         monthly_path = WIKI_DIR / "knowledge/owndays-history-monthly.md"
         # 事前に store_keyword 検出 (section 3 でやる検出を先取り) — store query なら monthly を圧縮
         early_store_keyword: Optional[str] = None
+        store_ambiguous: list[str] = []   # 曖昧時の候補 (bot に聞き返させる)
         stores_path_early = WIKI_DIR / "knowledge/owndays-history-stores.md"
         daily_stores_path_early = WIKI_DIR / "knowledge/owndays-daily-stores.md"
         if stores_path_early.exists():
             try:
                 _stores_c = stores_path_early.read_text(encoding="utf-8")
                 _daily_c = daily_stores_path_early.read_text(encoding="utf-8") if daily_stores_path_early.exists() else ""
-                early_store_keyword = self._detect_store_keyword(query, _stores_c, _daily_c)
+                # ★2026-08-09 海山指示: 地名で聞かれた時に黙らず候補を返す。
+                #   「新宿」は 3 店、「吉祥寺」は 吉祥寺 と 吉祥寺マルイ の 2 店。
+                #   確定できない時は候補を context に入れ、bot に聞き返させる
+                #   (候補は店舗マスターの部分集合なので捏造ゼロ)。
+                from brain_wiki_helpers.store_keyword import (
+                    resolve_store as _resolve,
+                    resolve_reply_against_candidates as _resolve_reply,
+                )
+                # ★2026-08-10: 聞き返しへの返信を **候補集合の中だけ** で先に解決する。
+                #   直前 user ターンが曖昧 (候補複数) だった場合、今回の短い返信
+                #   (「アルタ」「マルイの方」) を全店マスターに当てると別店に化ける
+                #   (実測: アルタ→アル・プラザ鹿島 / マルイ→マルイファミリー溝口)。
+                #   候補は前ターンで確定済みの集合なので、その中の一意一致が最強の証拠。
+                #   候補に無い店を正式名で指名された時は下の通常経路が拾う (fallback)。
+                if history:
+                    _prev_user = next(
+                        (h.get("content", "") for h in reversed(history)
+                         if isinstance(h, dict) and h.get("role") == "user"), "")
+                    if _prev_user:
+                        _pn, _pc = _resolve(_prev_user, _stores_c, _daily_c)
+                        if _pn is None and len(_pc) > 1:
+                            _picked = _resolve_reply(query, _pc)
+                            if _picked:
+                                early_store_keyword = _picked
+                                logger.info(
+                                    f"[candidate-reply] '{query[:24]}' → 候補 {len(_pc)} 件の中から"
+                                    f" '{_picked}' に確定")
+                if early_store_keyword is None:
+                    early_store_keyword, _cands = _resolve(query, _stores_c, _daily_c)
+                    if early_store_keyword is None and len(_cands) > 1:
+                        store_ambiguous = _cands
             except Exception:
                 pass
 
@@ -3364,7 +3552,11 @@ class BrainWiki:
                         daily_stores_content = daily_stores_path.read_text(encoding="utf-8")
                     except Exception:
                         pass
-                store_keyword = self._detect_store_keyword(query, content, daily_stores_content)
+                # ★2026-08-10: early (candidate-reply 込み) の解決を最優先。
+                #   ここが独自に再検出すると、聞き返しへの返信「アルタ」が
+                #   全店マスターで アル・プラザ鹿島 に化ける (E2E 実測で発覚)。
+                store_keyword = early_store_keyword or self._detect_store_keyword(
+                    query, content, daily_stores_content)
                 # ★2026-06-08 海山指摘 (大須 follow-up「直近3ヶ月は?」で店舗が落ちる) fix:
                 # 現 query に店舗が無いが period に解決済 (= この block は year_months 非空が前提)
                 # かつ reset 語が無いなら、直前 user ターンから店舗を補完する (context-aware)。
@@ -3733,6 +3925,16 @@ class BrainWiki:
             other_blocks = [p for p in parts if early_store_keyword not in p]
             parts = store_blocks + other_blocks
 
+        # ★2026-08-09: 店舗が特定できなかったが候補は分かる時、**黙らず聞き返させる**。
+        #   従来は曖昧な地名を blocklist で封鎖し、社員が最も使う呼び方 (新宿/吉祥寺) に
+        #   一切答えられなかった。候補は店舗マスターの部分集合なので捏造しない。
+        if store_ambiguous:
+            parts.insert(0,
+                "=== 店舗の確認が必要 ===\n"
+                f"この質問の店名は **{len(store_ambiguous)} 店** に当てはまる: "
+                + " / ".join(store_ambiguous[:6])
+                + "\n**どの店か確認してから答える**。数字を出す前に、上記のどれかを聞き返すこと。"
+                  "勝手に 1 店に決めない (別店の数字を出す方が『分からない』より悪い)。")
         return "\n\n".join(parts), included
 
     def _detect_store_keyword(
@@ -3840,7 +4042,7 @@ class BrainWiki:
             # vector search では chunk 化されて該当行を取りこぼすので core で全量保持。
             "knowledge/owndays-organization.md",
             # ★2026-05-07: 営業本部 AM/SV サマリ (~2K) を core に常駐。
-            # 「○○AMの担当 SV/店舗」型の問いに即答。詳細店舗 list は別ファイル
+            # 「中田AMの担当 SV/店舗」型の問いに即答。詳細店舗 list は別ファイル
             # (owndays-area-managers.md ~48KB) で vector search 経由で取れる。
             "knowledge/owndays-am-sv-summary.md",
             # ★2026-05-12: 直近の議事録 index (private=全文、海山 brain 用)。recent_n→50
@@ -4211,7 +4413,12 @@ class BrainWiki:
         # ★2026-05-24 Plan C v2 Step 2 (海山「進めて」): n_results を 15→30 に拡大 (= rerank 母集団)、
         #   Cohere Rerank で実 query 関連性順に並べ替え + top 10 に絞る
         vector_hits_total = 0
-        vector_hits_high_conf = 0  # distance < 0.5 (= chromadb cosine、低い = 関連性高)
+        # ★2026-08-15 実測訂正: この distance は cosine ではなく **squared L2** (本番 collection の
+        #   config は `"space":"l2"` = chroma 既定。`hnsw:space` を指定した箇所は存在しない)。
+        #   正規化ベクトルでは L2² = 2-2cos なので、閾値 0.5 の実効ラインは **cos > 0.75** =
+        #   cosine 距離だと思っていた場合 (cos > 0.5) より厳しい。この 0.5 が意図した水準かは
+        #   未検証 (retrieval eval で再確認する。ADR 2026-08-14-chroma-bloat-remediation.md §5)。
+        vector_hits_high_conf = 0  # distance < 0.5 (低い = 関連性高)
         min_distance: float | None = None
         # ★2026-06-08 vector budget reserve (default OFF。ADR 2026-06-08-hybrid-retrieval-bm25-rrf.md
         #   の確定診断「core file が予算 max_chars を無条件超過 (~145K) → この gate `acc < max_chars-1000`
@@ -4494,7 +4701,26 @@ class BrainWiki:
                 peripheral_parts.append(f"=== {rel} ===\n{content}")
 
         if full:
-            return "\n\n".join(parts)
+            # ★2026-08-03 コスト調査で判明した無音故障 (docs/decisions/2026-08-03-...):
+            # full=True は per-file 3000 字で切るだけで **全体予算が無く**、wiki 2,462 file /
+            # 約 260 万字 = 150-190 万 token に膨張していた。全 provider の context 上限を超えるため
+            # smart→smart-fallback→smart-gpt の全段で 400 になり、/lint・/clone・日次アラインメント
+            # 質問生成が 5 月頃から常時失敗 (課金ゼロなので誰も気づかなかった)。
+            # 総量上限を入れて機能を復旧させる (既定 = 軽量版の 4 倍 = 32 万字 ≒ 13 万 token)。
+            # ★cross-check R5: env で無制限に広げられると、1M context の Opus では
+            # 400 で止まらず 1 回 $5-7 の呼び出しになる。hard clamp を必ず掛ける。
+            full_budget = min(
+                int(os.getenv("BRAIN_WIKI_STATE_FULL_MAX", str(MAX_WIKI_STATE_CHARS * 4))),
+                400_000,
+            )
+            out = "\n\n".join(parts)
+            if len(out) > full_budget:
+                logger.warning(
+                    f"_read_wiki_state(full=True): {len(out):,} 字 > 上限 {full_budget:,} 字 → 切詰め "
+                    f"(全 provider の context 上限超過による無音失敗を回避)"
+                )
+                out = out[:full_budget] + "\n\n...(truncated: wiki 全文が上限超過)"
+            return out
 
         # コア記事を優先、残り予算で周辺記事を入れる
         combined_core = "\n\n".join(core_parts)
@@ -5110,6 +5336,39 @@ class BrainWiki:
             logger.warning(f"few-shot examples load failed: {e}")
             return "(few-shot examples load 失敗)"
 
+    # ★2026-07-22 ①follow-up 併合の鮮度上限 (分)。これを超えて古い直前 turn は継続扱いしない
+    #   (clone_history は TTL 無しのため、数日前の「昨日」が今日基準で再解決される時制ずれを防ぐ)。
+    _FOLLOWUP_MAX_MIN = int(os.getenv("CLONE_FOLLOWUP_MAX_MIN", "120"))
+
+    async def _extract_sales_slots(self, q: str) -> str:
+        """②miss限定スロット解釈の LLM 呼び出し (★2026-07-22 §1.15 DA 生存形)。
+
+        {period, scope, dimension} の**語スロットだけ**を抽出させる (金額・数値の出力は
+        prompt で禁止)。出力は business_intent.parse_slot_json が防御的に検証し、合成クエリは
+        既存の決定論パーサ (daily_history_inject / yoy_inject) が最終 validator になる =
+        数値が pre-guard で LLM を通過しない (ADR 2026-07-20 の桁事故理由①②が構造的に不可能)。
+        model は軽量 tier (env CLONE_SLOT_MODEL、default fast)。**timeout 12s・単発試行
+        (max_retries=1 = リトライ無し)** でレイテンシ追加を bound (cross-check Fact-checker 指摘で
+        docstring を実装に一致させた)。
+        """
+        payload = {
+            "model": os.getenv("CLONE_SLOT_MODEL", "fast"),
+            "messages": [
+                {"role": "system", "content": (
+                    "あなたは売上データ照会の正規化器。ユーザ質問から次の3スロットだけを抽出し、"
+                    "JSON のみを出力する: "
+                    '{"period": 期間表現をそのまま (例 昨日/一昨日/先週/今週/7月15日/6月) または null, '
+                    '"scope": 国名/エリア名/全社 (例 日本/台湾/関東/沖縄/全社) または null, '
+                    '"dimension": 国別/エリア別/業態別/リーグ別/既存店/全店/客数/客単価/前年比/'
+                    "既存店前年比 のいずれか または null}。"
+                    "質問に無い値を推測で埋めない。金額や数値は絶対に出力しない。"
+                    "売上データの照会でなければ全て null。")},
+                {"role": "user", "content": (q or "")[:200]},
+            ],
+            "max_tokens": 120,
+        }
+        return await self._post_litellm_with_retry(payload, timeout=12.0, max_retries=1)
+
     async def clone_respond_public(
         self,
         query: str,
@@ -5321,10 +5580,10 @@ class BrainWiki:
         # ★2026-07-11 海山指示「出店系の返答時に空白地マップ URL を直接出す」: token を source に
         #   直書きしない (§1.1) ため env から format-time 注入。未設定なら空 = prompt が「聞いてくれれば
         #   案内」に degrade。static 値 (per-deploy 不変) なので cache 分割は不変。
-        _wsp_token = os.getenv("WHITESPACE_TOKEN", "").strip()
-        _whitespace_url = (
-            f"https://brain.example.com/whitespace?token={_wsp_token}" if _wsp_token else ""
-        )
+        # ★2026-07-21 海山: whitespace は SSO (owndays-platform.com) へ移設。旧 brain.example.com の
+        #   token 付き URL 配布を停止し、SSO ベース URL を注入 (token を URL に載せない = §1.1)。
+        #   SSO 認証が社内限定を担うため常時提示 (env で差し替え可、static 値なので cache 分割は不変)。
+        _whitespace_url = os.getenv("WHITESPACE_SSO_URL", "https://whitespace.owndays-platform.com")
         system_text = CLONE_PUBLIC_PROMPT.format(
             wiki_content=wiki_content + user_memory_block + group_context_block,
             today=today_str,
@@ -5404,12 +5663,39 @@ class BrainWiki:
         if history:
             messages.extend(history[-10:])
 
+        # ★2026-07-22 ①follow-up 併合 (海山「社員クローンも少し agentic に」§1.15 DA 生存形):
+        #   直前が売上照会で今回が短い継続語 (「先週は?」「日本の」) なら、前クエリの**日付だけ**
+        #   引き継いだ query で以降の注入判定を行う (次元は今回優先 = シャドウ防止)。run_agent
+        #   (main.py _biz_follow) で実証済みロジックの決定論移植 = LLM 追加ゼロ。DM のみ
+        #   (group は複数人の発言が混ざり誰の質問の継続か決定論で判定できないため)。
+        #   LLM への user message は原文 query のまま (変えるのは注入判定の入力だけ)。
+        #   ★cross-check DA high 反映: 併合元は **DM 履歴 (scope='dm') の直前 user turn** に限り、
+        #   かつ **鮮度 120 分以内** の時だけ許す。理由: DM handler の history は scope='any' で
+        #   group 発言 (silent-listen 含む) を混載し、clone_history は TTL 無しのため、数日前の
+        #   「昨日の売上」に対する今日の「日本の」が *今日基準の昨日* で解決され、別の日のデータが
+        #   継続の顔で注入される (時制ずれ)。ts が取れない時は併合しない = fail-closed。
+        inject_query = query
+        if channel_id is None and user_id:
+            try:
+                import clone_history as _ch
+                from brain_wiki_helpers.business_intent import merge_from_dm_records as _bi_merge_dm
+                inject_query = _bi_merge_dm(
+                    query, _ch.load_recent(user_id, n=8, scope="dm", with_ts=True),
+                    max_minutes=self._FOLLOWUP_MAX_MIN)
+                if inject_query != query:
+                    logger.info(f"[clone] follow-up merge: {query[:30]!r} → {inject_query[:50]!r}")
+            except Exception:
+                inject_query = query
+
         # ★2026-07-11 施設/商圏 個別照会 (海山「空白地マップやDBから回答」+「全員に公開」):
         #   呼び手未指定なら自前検出 (§1.12b: main.py にロジックを足さない)。admin 判定は
         #   lookup_service.clone_context 内 (LW/LINE 両対応)。drive と同経路で前置き合成。
         if facility_context is None:
             try:
                 from scripts.tenpo import lookup_service as _tls
+                # ★cross-check Reviewer: 施設検出は **原文 query** で行う。併合語 (日付/メトリック) を
+                #   足すと正規化時の連結で新 bigram が生まれ別施設へ誤 latch する (実測: 「売上」+
+                #   「田園調布…」→「上田」で上田市に hit)。併合語に施設名は乗らないので利益もゼロ。
                 facility_context = _tls.clone_context(query, user_id or "")
             except Exception:
                 facility_context = None
@@ -5422,11 +5708,116 @@ class BrainWiki:
         sales_history_context = None
         try:
             from brain_wiki_helpers.daily_history_inject import build_context as _dhi_build
-            sales_history_context = _dhi_build(query, knowledge_dir=WIKI_DIR / "knowledge")
+            sales_history_context = _dhi_build(inject_query, knowledge_dir=WIKI_DIR / "knowledge")
         except Exception:
             sales_history_context = None
         if sales_history_context:
             drive_context_block = sales_history_context + "\n\n" + (drive_context_block or "")
+
+        # ★2026-08-16 最上級 (「過去最高」「一番売れた日」) の決定論注入。
+        #   期間語を含まないため daily_history_inject は発火せず、bot が vector 検索の
+        #   断片だけを見て最大値を答えていた (2026-08-15 SG 誤答の直接原因)。
+        #   月次 (37ヶ月) と日次 (保持範囲) を分けて決定論で順位を出す。
+        try:
+            from brain_wiki_helpers.record_inject import build_context as _rec_build
+            record_context = _rec_build(inject_query, knowledge_dir=WIKI_DIR / "knowledge")
+        except Exception:
+            record_context = None
+        if record_context:
+            drive_context_block = record_context + "\n\n" + (drive_context_block or "")
+
+        # ★2026-07-20 昨年対比 (YoY) の決定論注入 (海山「昨年対比も見れるように」)。
+        #   既存店前年比=Monday Dash 公式 / 全店=完了月 monthly.json。日次の自前 YoY は作らない。
+        try:
+            from brain_wiki_helpers.yoy_inject import build_yoy_context as _yoy_build
+            yoy_context = _yoy_build(inject_query, knowledge_dir=WIKI_DIR / "knowledge")
+        except Exception:
+            yoy_context = None
+        if yoy_context:
+            drive_context_block = yoy_context + "\n\n" + (drive_context_block or "")
+
+        # ★2026-07-20 日本の趨勢注入 (海山「日本の売上が弱い→前年比・エリア別YoYで趨勢を掴みやすく」)。
+        #   日本 (default/明示) の日次売上照会に 日本 total 前年比 + エリア別 前年比 を厚める。
+        try:
+            from brain_wiki_helpers.yoy_inject import build_japan_trend as _jp_trend
+            trend_context = _jp_trend(inject_query)
+        except Exception:
+            trend_context = None
+        if trend_context:
+            drive_context_block = trend_context + "\n\n" + (drive_context_block or "")
+
+        # ★2026-07-22 ②miss限定スロット解釈 (§1.15 DA 生存形 = 二段決定論注入):
+        #   売上系 intent なのに全 injector が miss (= 言い回しが決定論パーサに合わない) の時
+        #   だけ、LLM に {period/scope/dimension} の**語スロットのみ**抽出させ、合成クエリを
+        #   既存パーサで検証して既存 injector → 既存 sales_numeric_guard 経路へ復帰する。
+        #   数値は pre-guard で LLM を通らない (常時 tool-loop 案は ADR 2026-07-20 の桁事故
+        #   理由①② + guard closure 不発で棄却済)。規程 intent は対象外 (売上 injector が無く
+        #   恒常 miss になり +1 LLM が常設化するため = DA 指摘)。DM のみ。
+        #   gate: CLONE_SLOT_FALLBACK=0 で即 OFF (default ON = 海山 2026-07-22 GO)。
+        # ★2026-08-16 cross-check: record_context を条件に含めないと、最上級クエリは
+        #   期間語を持たないため dhi/yoy/trend が必ず全 miss = 決定論注入が成功した回でも
+        #   毎回 +1 LLM が走り、canon 側で同じブロックが二重注入され、しかも
+        #   「【解釈メモ】…先週と解釈して」が全期間の問いに前置される矛盾が出る。
+        if (sales_history_context is None and yoy_context is None and trend_context is None
+                and record_context is None
+                and channel_id is None
+                and os.getenv("CLONE_SLOT_FALLBACK", "1") != "0"):
+            _slot_meta = None
+            try:
+                from brain_wiki_helpers.business_intent import (
+                    compose_slot_query as _bi_compose,
+                    is_sales_intent as _bi_sales,
+                    parse_slot_json as _bi_pslots,
+                    slots_conflict_with_query as _bi_conflict,
+                )
+                if _bi_sales(inject_query):
+                    _slots = _bi_pslots(await self._extract_sales_slots(inject_query))
+                    # ★cross-check DA: 元クエリに既知の期間語があるのに slot の period が別 =
+                    #   LLM 誤抽出の強いシグナル (決定論パーサが既に拾えているはずの語のため)。
+                    #   「一昨日」→「昨日」型の誤解釈で *別の日の正しい数値* を返す事故を防ぐ。
+                    _conflict = _bi_conflict(inject_query, _slots)
+                    _canon = None if _conflict else _bi_compose(_slots, source_query=inject_query)
+                    _slot_meta = {"canon": bool(_canon), "injected": False, "conflict": _conflict}
+                    if _canon and _canon != inject_query:
+                        logger.info(f"[clone] slot fallback: {inject_query[:40]!r} → {_canon!r}")
+                        from brain_wiki_helpers.daily_history_inject import build_context as _dhi_b2
+                        from brain_wiki_helpers.yoy_inject import (
+                            build_japan_trend as _jp_t2, build_yoy_context as _yoy_b2)
+                        # ★cross-check Reviewer: 本来の注入は **直列独立** (dhi と yoy は両方載りうる)。
+                        #   else 連鎖にすると既存店の質問に全店日次だけが載り公式 YoY が欠落する。
+                        sales_history_context = _dhi_b2(_canon, knowledge_dir=WIKI_DIR / "knowledge")
+                        if sales_history_context:
+                            drive_context_block = sales_history_context + "\n\n" + (drive_context_block or "")
+                        yoy_context = _yoy_b2(_canon, knowledge_dir=WIKI_DIR / "knowledge")
+                        if yoy_context:
+                            drive_context_block = yoy_context + "\n\n" + (drive_context_block or "")
+                        trend_context = _jp_t2(_canon)
+                        if trend_context:
+                            drive_context_block = trend_context + "\n\n" + (drive_context_block or "")
+                        # ★2026-08-16: 「過去3年だと?」型の follow-up は単独では国も
+                        #   最上級語も持たない。canon (併合後) で初めて最上級注入が効く。
+                        from brain_wiki_helpers.record_inject import build_context as _rec_b2
+                        record_context = _rec_b2(_canon, knowledge_dir=WIKI_DIR / "knowledge")
+                        if record_context:
+                            drive_context_block = record_context + "\n\n" + (drive_context_block or "")
+                        _slot_meta["injected"] = bool(
+                            sales_history_context or yoy_context or trend_context or record_context)
+                        if _slot_meta["injected"]:
+                            # ★cross-check DA: 解釈結果を user 可視にする (誤解釈を言い直せるように)
+                            drive_context_block = (
+                                f"【解釈メモ】質問の期間・対象を「{_canon}」と解釈して下記データを取得した。"
+                                "応答では対象期間を必ず明示すること (解釈違いなら言い直してもらう)。\n\n"
+                                + drive_context_block)
+            except Exception as e:
+                # ★§1.18: LLM 断を無言にしない (bot_events に error として残す)
+                _slot_meta = {"canon": False, "injected": False, "error": type(e).__name__}
+                logger.warning(f"[clone] slot fallback failed (soft): {e}")
+            if _slot_meta is not None:
+                try:
+                    from scripts.bot_events import log_bot_event
+                    log_bot_event("clone_respond", "slot_fallback", **_slot_meta)
+                except Exception:
+                    pass
 
         # 添付資料がある場合は user message を膨らませる
         if attached_content:
@@ -5474,7 +5865,10 @@ class BrainWiki:
             # 文(聞き返し)の途中で truncate する事象が発生 (海山報告)。LW 配信上限(~1900字)でも
             # timeout でもなく LLM 出力 cap が真因 (回答 ~700-900字 = ~600 token で停止)。
             # output token は安価 ($25/MTok・請求の~1%) で cap 引上げのコスト影響は無視可、latency のみ。
-            max_tokens = 1800 if len(query or "") > 1000 else 1200
+            # ★2026-08-10 (再ローンチ総点検): 1200 でも文中切断が 60 日で 9 件
+            #   (全て 1520〜1630 字 = ちょうど 1200 token 付近に集中、うち 2 件は
+            #   multibyte 分断で置換文字「�」が本文末尾に露出)。1600 に引上げ。
+            max_tokens = 2200 if len(query or "") > 1000 else 1600
 
         # 構造化ログ: 1 turn = 1 event (★2026-05-21 bot logging 構造化)
         try:
@@ -5551,10 +5945,15 @@ class BrainWiki:
             text_out = _canonicalize_brand(text_out)
             # ★2026-07-13 日次売上注入時の数値ガード: 注入ブロックに無い数値 (= LLM 生成) を
             #   検知したら確定値の決定論集計を追記 (tenpo numeric_guard と同型、安全側)
-            if sales_history_context and text_out:
+            # ★2026-08-16: record ブロックの数値もガードの既知集合に入れる。
+            #   入れないと「決定論で出した順位の数字」を guard が未知値と見なし、
+            #   正しい応答に誤った脚注が付く (cross-check Reviewer 指摘)。
+            _guard_block = "\n".join(
+                b for b in (sales_history_context, record_context) if b)
+            if _guard_block and text_out:
                 try:
                     from brain_wiki_helpers.daily_history_inject import sales_numeric_guard
-                    text_out = sales_numeric_guard(text_out, sales_history_context)
+                    text_out = sales_numeric_guard(text_out, _guard_block)
                 except Exception:
                     pass
             # ★2026-07-11 施設DB 注入時の桁事故ガード (§1.15 DA #4): LLM の単位換算ミスを決定論追記で矯正
@@ -5673,7 +6072,12 @@ class BrainWiki:
                 )
             except Exception:
                 pass  # logging 失敗は本流に影響させない
-            return "お休みをいただいてます。しばらく経ってから再度試して。"
+            # ★2026-08-10 (再ローンチ総点検): 旧文言「お休みをいただいてます」は
+            #   (a) 定休・休暇と誤読される (b) 日本語固定で英語ユーザの会話を殺していた
+            #   (実例 7/28: 英語での対話中にこれが返り、以後そのユーザの質問が途絶)。
+            #   システム都合であることを明示し、日英併記にする。
+            return ("いま一時的に応答できない状態。数分おいてもう一度send してみて。\n"
+                    "(Temporary system issue — please try again in a few minutes.)")
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # Step 4a-2: Clone Memory Update (★2026-05-14)
@@ -5728,7 +6132,7 @@ class BrainWiki:
             "4. **★Tier 1 date metadata**: 各 Ongoing Topics / Key Facts item 末尾に\n"
             f"   発生 / 確認日を `(YYYY-MM-DD)` 形式で付与。新規は `({today_str})`、\n"
             "   既存項目の更新は元日付保持して追加情報部分に新日付付与。\n"
-            "   例: `- ○○モール出店 (2026-05-15)、店長候補 3 名選考中 ({today_str})`\n"
+            "   例: `- 龍仁モール出店 (2026-05-15)、店長候補 3 名選考中 ({today_str})`\n"
             "5. **保存しない情報**: 健康の深刻な悩み / 家族の極めて私的な事情 / 第三者の悪口 /\n"
             "   性的内容 / 個人を特定できる電話番号・住所等\n"
             "6. 出力は MD 形式の 4 セクションのみ (frontmatter なし、コメント・解説なし)\n"
@@ -6081,6 +6485,9 @@ class BrainWiki:
    例: 「部下が大失敗したとき最初に何を考える？」「予定外のことが起きたとき」
 5. **矛盾探索（Contradiction）** — Wiki内の既存記述を掘り下げ・確認
    例: 「以前〇〇と言っていたが、今も同じ考え？」
+   ★このカテゴリは **下記サマリに実際に載っている見出し・次元名だけ** を根拠にすること。
+   本文は渡していないので、「以前〇〇と言っていた」の〇〇を**推測で書かない**
+   (書けるのは「〇〇の話は前にしたが、今も同じか」まで)。根拠が無ければ別カテゴリにする。
 
 ### ルール
 - 1回に質問は **1問だけ** — 深い回答を引き出すため
@@ -6188,19 +6595,127 @@ class BrainWiki:
             "source_id": chosen.get("id", ""),
         }
 
+    def _build_coverage_digest(self, max_chars: int = 12000) -> str:
+        """「どこが埋まっていて、どこが空白か」の**構造サマリ**を返す (本文は含めない)。
+
+        ★2026-08-03 コスト/品質の同時修正。従来は _read_wiki_state(full=True) で wiki 全文
+        (実測 260 万字) を投げていたが、(a) 全 provider の context 上限を超えて 21:00 の質問生成が
+        5月頃から失敗し続け、(b) 上限を入れた後も **辞書順の先頭 12% しか見えない** ため
+        interview/ (= 人格の空白そのもの) には 1 バイトも届かない、という二重の破綻をしていた。
+        月 $21-36 を払って「間違った 12%」を眺めていたことになる。
+
+        空白の把握に必要なのは本文でなく (1) 16 次元の depth (2) どんな話題が既にあるか の 2 つ。
+        coverage_report は薄い次元を数値で持っているので、これが本来の一次情報。
+        """
+        parts: list[str] = []
+        try:
+            import alignment_interview as _ai
+            rows = _ai.coverage_report()
+            parts.append("### 人格 16 次元のカバレッジ (depth 0=未着手 〜 5=十分、薄い順)")
+            for r in rows:
+                parts.append(
+                    f"- {r['label']} (id={r['id']}): depth {r['depth_score']} / "
+                    f"{r['session_count']}回 / 最終 {r.get('last_explored') or '未'}"
+                )
+        except Exception as e:
+            parts.append(f"(coverage 取得失敗: {e})")
+
+        # wiki の話題インデックス (path + 見出しのみ = 本文は送らない)
+        try:
+            from brain_wiki_helpers.domain import is_deep_private_rel
+        except Exception:
+            def is_deep_private_rel(_):  # type: ignore
+                return False
+        # ★2026-08-03 §1.15 Reviewer H1: 初版は全 file を辞書順に並べて末尾で切っており、
+        # 実測 3,020 file 中 145 file (4.8%) = **全て `analysis/`** しか載らず、肝心の
+        # interview/ には 1 行も届いていなかった (docstring が批判している「辞書順の先頭だけ」
+        # をタイトル層で再生産していた)。ディレクトリ別に予算を配分し、人格質問に効く dir を
+        # 優先して全件、それ以外は件数 + サンプルにする。
+        buckets: dict[str, list[str]] = {}
+        for f in sorted(WIKI_DIR.rglob("*.md")):
+            try:
+                rel = str(f.relative_to(WIKI_DIR))
+            except Exception:
+                continue
+            # interview/ は「既に聞いた領域」を知るために **含める** (海山-facing、v3 ADR)
+            if is_deep_private_rel(rel) and not rel.startswith("interview/"):
+                continue
+            head = ""
+            try:
+                for ln in f.read_text(encoding="utf-8", errors="ignore").splitlines()[:40]:
+                    if ln.startswith("# "):
+                        head = ln[2:].strip()[:60]
+                        break
+            except Exception:
+                pass
+            top = rel.split("/")[0] if "/" in rel else "(root)"
+            buckets.setdefault(top, []).append(f"- {rel}{(' — ' + head) if head else ''}")
+
+        # ★§1.15 DA: 旧経路 (wiki 本文 320K 字) は 8/13-15 に実際に質問を生成できており、その
+        # 具体性は **analysis/ の本文を読んでいないと書けない** ものだった。title だけに落とすと
+        # 接地 (grounding) が構造的に失われる = コスト削減が質を殺す。ただし旧経路が読んでいたのは
+        # 「辞書順で先頭に来た analysis/」= 直近業務であって、人格の空白ではない。
+        # そこで **接地は残しつつ読む場所を変える**: 本文を渡すのは interview/ (= 人格そのもの) に
+        # 限定し、事業 wiki は title だけ (しかも辞書順でなく更新順) にする。
+        # **セクション別に予算を切る**。末尾で一括 truncate すると、先に来たセクションが
+        # 全部食って後続が消える (初版でこれを踏み、事業 title が judgment/ で尽きた)。
+        iv_rows = buckets.pop("interview", [])
+        iv_budget = int(max_chars * 0.45)
+        iv_parts: list[str] = ["\n### 既に聞けている人格の中身 (interview/ の最新部分)"]
+        iv_files = sorted((WIKI_DIR / "interview").glob("*.md")) if (WIKI_DIR / "interview").exists() else []
+        per = max(120, iv_budget // max(1, len(iv_files))) if iv_files else 0
+        for f in iv_files:
+            try:
+                b = f.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+            if b.startswith("---"):
+                e = b.find("\n---", 3)
+                if e > 0:
+                    b = b[e + 4:]
+            b = " ".join(b.split())          # 改行を潰して 1 次元 1 行にする (行数を予測可能に)
+            if b:
+                # append-only file なので **末尾** = 最新の insight (先頭は最古で永久固定される)
+                iv_parts.append(f"- [{f.stem}] {b[-per:]}")
+        if not iv_files:
+            iv_parts.append("- (まだ 1 件も無い = 人格の蓄積がゼロ)")
+        parts.extend(iv_parts)
+
+        # 事業 wiki は「何の話題が既にあるか」だけ分かればよい = title のみ、dir 別に均等配分
+        PRIORITY = ("identity", "judgment", "style", "hobbies", "(root)")
+        total = sum(len(v) for v in buckets.values()) + len(iv_rows)
+        used = sum(len(p) + 1 for p in parts)
+        title_budget = max(0, max_chars - used - 200)
+        parts.append(f"\n### wiki に既にある話題 (全 {total} file、path と見出しのみ)")
+        order = [d for d in PRIORITY if d in buckets] + sorted(set(buckets) - set(PRIORITY))
+        share = title_budget // max(1, len(order))
+        for d in order:
+            rows, acc, shown = buckets[d], 0, []
+            for r in rows:
+                if acc + len(r) + 1 > share:
+                    break
+                shown.append(r); acc += len(r) + 1
+            parts.append(f"\n#### {d}/ ({len(rows)} file"
+                         + (f"、うち {len(shown)} 件抜粋" if len(shown) < len(rows) else "、全件") + ")")
+            parts.extend(shown)
+        out = "\n".join(parts)
+        return out[:max_chars] + ("\n…(以下略)" if len(out) > max_chars else "")
+
     async def generate_alignment_question(self) -> dict:
         """Wikiの現状を見て、最適なアライメント質問を1つ生成
 
-        Wikiの空白領域を把握する必要があるため full=True（1日1回の低頻度呼び出し）。
+        ★2026-08-03: wiki 全文 dump をやめ _build_coverage_digest (構造サマリ) に変更。
+        従来は 227K token を投げて失敗 or 先頭 12% しか見えず、月 $21-36 の無駄 + 機能不全だった。
 
         ★2026-04-30 改修: LLM が空配列 / 重複質問を返した時に必ず fallback で
         プール (questions_50.json + questions_100.json、150 問) からランダム pick する。
         以前は固定 fallback 1 問が毎日送られていた。
 
-        ★2026-07-03: 出力は海山への質問のみ (海山-facing)。include_interview=True で
-        interview/ の既カバー領域を見せ、既知の話を再質問しない (v3 ADR DA R6)。
+        ★2026-07-03: 出力は海山への質問のみ (海山-facing)。interview/ の既カバー領域を見せ、
+        既知の話を再質問しない (v3 ADR DA R6)。★2026-08-03 でその経路は include_interview=True
+        から _build_coverage_digest 内の path 判定へ移った (本文でなく見出しのみを渡す)。
         """
-        wiki_content = self._read_wiki_state(full=True, include_interview=True)
+        wiki_content = self._build_coverage_digest()
 
         # 過去の質問履歴を読む
         history_file = BRAIN_ROOT / "alignment_history.json"
@@ -6365,15 +6880,21 @@ class BrainWiki:
 
     async def _call_llm(self, prompt: str, model: str = "smart") -> str:
         try:
+            # ★2026-08-03: temperature 非対応モデル (Opus 4.8 / Fable 5) には送らない。
+            # 送ると Anthropic が 400 を返し litellm が無言で gpt-4o へ fallback していた
+            # (支出の 42% / judge の別系列防壁も無効化)。brain_wiki_helpers/model_params.py
+            from brain_wiki_helpers.model_params import apply_model_params
+            payload = apply_model_params(
+                {
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 4000,
+                },
+                model, temperature=0.1,
+            )
             resp = await self.http.post(
                 f"{self.litellm_url}/v1/chat/completions",
                 headers={"Authorization": f"Bearer {self.litellm_key}"},
-                json={
-                    "model": model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 4000,
-                    "temperature": 0.1,
-                },
+                json=payload,
             )
             resp.raise_for_status()
             return resp.json()["choices"][0]["message"]["content"]

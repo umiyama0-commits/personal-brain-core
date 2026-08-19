@@ -1,37 +1,229 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# brain-agent (Personal Brain / core) .gitignore — public 版
+# brain-agent .gitignore
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# ★このリポジトリはコアのみ。実データ (会話・売上・人格・wiki 本文) は一切含まない。
-#   data/ 配下は runtime で生成される個人データなので全 ignore (誤 commit 防止)。
+# ★2026-05-19 外科的分離方式:
+#
+# 根本ジレンマ: 同じファイルを「Mac mini が自動再生成」しつつ
+# 「MacBook で手編集」すると 2-way 同期は構造的に不可能。
+# → ファイル種別で source を固定する:
+#
+#  ● main 同期 (MacBook で書く・deliberate・低 churn):
+#    hobbies / decisions / style / schema / system_improvements /
+#    alignment(HTML+回答) / raw/notes (アイディア・資料) / 小状態 json
+#  ● git 管理外 (Mac mini 自動生成・high churn、海山は手編集しない):
+#    people / projects / meetings / interview / imported_drive /
+#    embodiment / judgment / reflex / knowledge / index/identity/
+#    thinking/style.md(compile出力) / raw(notes以外) / import / clone_* /
+#    extractor_state / meta / chroma 等 (履歴は backup_wiki.sh が独立保全)
+#
+# これで Mac mini scraper churn は git status に出ず、MacBook の
+# deliberate 編集と衝突しない (旧: wiki ほぼ全 track で people/projects
+# が常時 churn → 衝突・作業消失。今回の事故の根治)。
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-# 実データ・生成物 (絶対に commit しない)
+# ── 既定: data/ 全 ignore。各階層で dir/* 再 ignore → 欲しい所だけ ! ──
+# (親 dir を ! しただけだと配下が全復活するので、階層ごとに */ で塞ぐ)
 data/
-chroma_data/
-*.pem
-*.key
+!data/
+data/*
+!data/brain/
+data/brain/*
+!data/brain/wiki/
+data/brain/wiki/*
+!data/brain/raw/
+data/brain/raw/*
 
-# secret / env
-.env
-.env.*
+# ── MacBook 編集 → main 同期する deliberate サブツリーだけ復活 ──
+!data/brain/wiki/hobbies/
+!data/brain/wiki/hobbies/**
+!data/brain/wiki/decisions/
+!data/brain/wiki/decisions/**
+!data/brain/wiki/style/
+!data/brain/wiki/style/**
+# ★2026-06-10: 手動 PJ 分析 wiki (whitespace 出店空白地 等)。MacBook で deliberate に
+# 連携・低 churn。projects/(Mac mini 自動生成・high churn) とは別カテゴリで track する。
+!data/brain/wiki/analysis/
+!data/brain/wiki/analysis/**
+# ★2026-06-10 cross-check 指摘: サブPJ 分析の生成物 (CSV/PNG/HTML) は high churn・機械派生。
+# git add -A で混入し 1.14「生成物 churn → 衝突」病が再発するため明示 ignore。
+# PJ コード (<pj>_analysis/*.py) は track、生成物だけ落とす。
+/output/
+whitespace_analysis/output/
+/output_tw/
+whitespace_analysis_tw/output/
+/output_sg/
+whitespace_analysis_sg/output/
+/output_th/
+whitespace_analysis_th/output/
+!data/brain/schema/
+!data/brain/schema/**
+!data/brain/system_improvements/
+!data/brain/system_improvements/**
+!data/brain/alignment/
+!data/brain/alignment/**
+!data/brain/raw/notes/
+!data/brain/raw/notes/**
+# ★2026-07-05: chat export 配送用 inbox (リモート session → git → Mac mini)。
+# scripts/import_inbox_sweep.py が manifest のドメイン宣言に従い IMPORT_DIR /
+# wiki/personal へ routing する。ファイルは提出アーカイブとして track に残す。
+!data/brain/import_inbox/
+!data/brain/import_inbox/**
+!data/brain/system_prompt_patches.json
+!data/brain/alignment_history.json
+# ★2026-07-06: もぐもぐ backfill のリクエストは git 配送 (状態 .magazine_backfill_state.json は local)
+!data/brain/magazine_backfill_request.json
+# ★2026-07-11: 施設/商圏 lookup index は git 配送 (MacBook で build_lookup_index 再生成 → commit。
+#   host は git pull 受領 → container mount ./data 経由で bot が読む。output/raw 依存で host 再生成不可)
+!data/brain/tenpo_lookup.json
+# ★2026-05-23: reminders/ は MacBook で deliberate 作成、Mac Studio cron で配信
+!data/brain/reminders/
+!data/brain/reminders/**
+# ★2026-07-20: bot 自動生成 (owner_memory.create_reminder) は非追跡 auto/ に分離
+#   (MacBook 手動 commit との git pull 衝突 + 会話由来 private 内容が追跡 path に乗るのを回避)
+data/brain/reminders/auto/
+
+# ── tracked 親配下に紛れる Mac mini 自動生成を再 ignore ──
+data/brain/alignment/interview_coverage.json
+data/brain/alignment/interview_extracted/
+# ★2026-06-08 評価#1: eval runtime ログ (Mac Studio cron/deploy が append-only で生成、high churn)。
+# deliberate な eval_set/alignment 回答とは別の派生物 → ignore (1.14 外科的分離)。
+data/brain/alignment/eval_summary_v1.jsonl
+data/brain/alignment/eval_gate_verdicts.jsonl
+data/brain/alignment/retrieval_eval_summary.jsonl
+data/brain/alignment/eval_results/
+# ★2026-05-19: build_grouped_monthly.py の生成 wiki (毎日再生成) +
+# build_store_master.py の派生マスター。raw/notes は git 同期対象だが
+# store_master_*.json は機械派生で毎日新ファイル → churn 再発防止に明示 ignore。
+# (これを忘れると docker-PATH と同型の "生成物 churn → 衝突" 病が復活)
+data/brain/wiki/knowledge/owndays-history-prefecture-monthly.md
+data/brain/wiki/knowledge/owndays-history-prefecture-daily.md
+data/brain/wiki/knowledge/owndays-history-am-monthly.md
+data/brain/wiki/knowledge/owndays-history-am-daily.md
+data/brain/wiki/knowledge/owndays-history-sv-monthly.md
+data/brain/wiki/knowledge/owndays-history-sv-daily.md
+data/brain/raw/notes/store_master_*.json
+
+# ★2026-06-08 評価 Security: scraped 会話 (line_/gmail_/gcal_) は第三者 (社員/取引先) の
+# 個人通信 = 第三者 PII を含むため git/GitHub 管理外にする (privacy_gate を通っていない生データ)。
+# 置き場所は Mac Studio disk (bot は disk を読むので挙動不変) + restic 暗号化 offsite backup。
+# wiki は compile 済 (scrub 後) を tracked のまま = 共有する成果物。
+# ※ 既存の tracked 分は restic backup 確立後に Mac Studio 側で git rm --cached する
+#    (= disk に残しつつ index から外す。詳細: docs/decisions/2026-06-08-raw-notes-conversations-untrack.md)
+data/brain/raw/notes/lineworks_*
+data/brain/raw/notes/line_*
+data/brain/raw/notes/gmail_*
+data/brain/raw/notes/gcal_*
+
+# (★2026-05-21 history/ 例外は knowledge/* re-ignore の後に置く必要があるため
+#  下の knowledge/* セクションの後に移動)
+
+# ── ★2026-05-19 MacBook が deliberate に書いた wiki/knowledge/ 例外 ──
+# wiki/knowledge/ 全体は Mac mini 自動生成 (ignored) だが、
+# 以下 3 ファイルは MacBook (Claude / 海山) が deliberate に書いた永続データ。
+# Mac mini compile はこれらを上書きしない契約 (= 「MacBook 編集権限あり」リスト)。
+# 3 段階パターン: 親 dir を ! → 中身を再 ignore → 個別 file を !
+!data/brain/wiki/knowledge/
+data/brain/wiki/knowledge/*
+!data/brain/wiki/knowledge/owndays-fy26-results.md
+!data/brain/wiki/knowledge/fy27-aop.md
+!data/brain/wiki/knowledge/clone-disclosure-policy.md
+!data/brain/wiki/knowledge/owndays-store-development.md
+!data/brain/wiki/knowledge/owndays-vmv.md
+!data/brain/wiki/knowledge/owndays-store-master.md
+!data/brain/wiki/knowledge/owndays-tsa.md
+!data/brain/wiki/knowledge/owndays-sales-metrics-stance.md
+# ★2026-06-01 海山共有: 日本戦略 統合ナレッジ (Personal Brain投入用、MacBook deliberate)
+!data/brain/wiki/knowledge/owndays-japan-strategy.md
+
+# ★2026-05-22: wiki/judgment/ は通常 judgment_extractor 自動生成 (ignored) だが、
+# alignment_trial 由来の deliberate digest だけ tracked にする
+!data/brain/wiki/judgment/
+data/brain/wiki/judgment/*
+!data/brain/wiki/judgment/alignment-trial-2026-05-digest.md
+
+# ★2026-05-21 (項目 5 Phase 1): 組織時系列 snapshot
+# graph DB なしの bi-temporal、master 更新時に手動 snapshot 追加運用
+!data/brain/wiki/knowledge/history/
+!data/brain/wiki/knowledge/history/**
+# ★2026-05-19 矛盾解消: 下記 6 grouped wiki の `!` un-ignore は
+# 削除した。build_grouped_monthly.py を scrape_cron で 2h おき再生成
+# するようにしたため、track すると毎サイクル churn → 別 PC commit と
+# 衝突する (root-fix した docker-PATH と同型の "生成物 churn" 病)。
+# 他の owndays-history-* / owndays-daily-* 全部と同じく ignore が正。
+# 履歴は backup_wiki.sh が独立 git で保全。
+# 【次に編集する人へ】これらに `!` を再追加しないこと (cron 再生成物)。
+#   data/brain/wiki/knowledge/owndays-history-{prefecture,am,sv}-{monthly,daily}.md
+#   は上の "再 ignore" セクション (line ~61) で ignore 済。
+
+# ── ★2026-05-19 wiki/style.md (core retrieval) 例外 ──
+# style.md は通常 compile 出力扱いで ignored だが、core retrieval (常時 context) に
+# 直接効くため、MacBook 編集ルートを開ける必要がある。
+# Mac mini compile は MacBook 編集を尊重して上書きしない契約。
+!data/brain/wiki/style.md
+
+# ── Secrets / Credentials (root 等、data/ 外でも絶対 commit 禁止) ──
+.env*
 !.env.example
+.envrc
+.envcat
+*.pem
+*.pem.txt
+*.key
+credentials.json
+client_secret*.json
+token.json
+*.token
+*.token.json
+**/cookies.json
+**/.session
 
-# Python
+# ── Chroma vector DB (rebuildable, 巨大) ──
+chroma_data/
+
+# ── Python ──
 __pycache__/
 *.py[cod]
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
+*$py.class
+*.so
+.Python
 *.egg-info/
+.pytest_cache/
 .venv/
 venv/
+env/
+.mypy_cache/
+.ruff_cache/
 
-# OS / editor
+# ── MCP / playwright (巨大ログ・スクショ) ──
+.playwright-mcp/
+
+# ── Local Claude / IDE settings ──
+.claude/settings.local.json
+
+# ── OS / Editor ──
 .DS_Store
-*.swp
 .idea/
 .vscode/
+*.swp
+*.swo
+*~
+Thumbs.db
 
-# logs / tmp
-*.log
-scratchpad/
-tmp/
+# ── Node ──
+node_modules/
+npm-debug.log*
+
+# ── Temporary ──
+*.tmp
+*.bak
+*.backup
+.cache/
+build/
+dist/
+
+# ── Review tarball (生成物、commit しない) ──
+personal-brain-review-*.tar.gz
+
+# 眼鏡空白地ダッシュボード (mounted配信用、追跡)
+!data/brain/web/
+!data/brain/web/**

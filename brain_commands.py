@@ -27,6 +27,43 @@ from brain_wiki import BrainWiki
 JST = timezone(timedelta(hours=9))
 logger = logging.getLogger(__name__)
 
+# ★2026-07-20 海山指示「個人 LINE bot を正式に Umiyama AI Agent として本人向けに」:
+# /help で全機能・全入口を一望 (社員向け welcome の本人版。記憶頼み 50+ コマンドの解消)
+UMIYAMA_AGENT_HELP = """🤖 Umiyama AI Agent — 海山専属 AI エージェント
+
+【そのまま話す (コマンド不要)】
+・売上/客数/予算比/前年比/ランキング・制度規程・施設商圏 → 社員向けうみやまAIと同じ回答エンジン (捏造ガード付き)
+・質問/相談 → wiki・カレンダー・Gmail・Drive を横断して回答
+・「◯◯を覚えておいて」→ 恒久メモリに保存
+・「明日リマインドして」→ 指定日の朝9時に LINE 通知
+・「タスクに入れて」「◯◯終わった」→ タスク管理
+・施設名を聞く → 空白地DB から館プロファイル
+・画像/ファイル/音声/動画を送る → 自動で Wiki に取込
+※会話は全て背景で Wiki に蓄積されます
+
+【記憶/知識】
+/memory 恒久メモリ一望・編集 | /teach 即Wiki化 | /memo 返答なし保存
+/wiki 検索 | /brain 蓄積状況+Brain Map | /graph Map URL | /forward 転送学習
+/personal 個人PJ (Example等) | /diary 日記 | /drive Drive検索・取込
+
+【人格アラインメント】
+/align 質問に答える | /align-voice 音声蒸留レビュー | 電話・/voice-align で音声雑談
+
+【クローン運用 (社員向けうみやまAI の管理)】
+/clone テスト応答 | /clone-feedback 修正希望処理 | /clone-learning 学習承認
+/reflux 判断軸還流の承認 | /bridge 記憶接続の承認 | ○×! で1タップ監査
+
+【システム】
+/claude 開発指示 (plan→承認→実装) | /lint 健診 | /research AI研究提案
+
+【他の入口】
+・LINE Works (自分のDM): /分析 /戦略 /出店 <エリア>
+・Web: /chat 会話 | /dashboard 予定+メール | Brain Map
+・電話 (Vapi): 音声で雑談・PB検索
+・Claude スマホアプリ: PB コネクタ検索
+
+通知は critical 以外 1日2回のまとめ配信 (10時/19時、無ければ無し)"""
+
 
 async def handle_brain_commands(app, user_id, message, reply_token):
     """ブレインWikiコマンドを処理。処理した場合Trueを返す。"""
@@ -112,6 +149,21 @@ async def handle_brain_commands(app, user_id, message, reply_token):
         await brain.ingest_note(user_id, content, title="teach", model="smart")
         await reply_message(http, reply_token, f"Wikiにコンパイルしました")
         return True
+
+    # ─── /help — Umiyama AI Agent の全機能一覧 (★2026-07-20 正式化) ───
+    if message.strip() in ("/help", "/help agent"):
+        await reply_message(http, reply_token, UMIYAMA_AGENT_HELP)
+        return True
+
+    # ─── /memory — 個人アシスタントの恒久 owner-memory 一望/編集 (★2026-07-20) ───
+    # ルーティングは main.py の既存 "/memo" prefix に乗る (admin gate 済)。
+    # "/memo " (末尾スペース) より先に判定して衝突を回避。
+    if message.strip().startswith("/memory"):
+        from services import owner_memory as _om
+        resp = _om.handle_memory_command(message)
+        if resp:
+            await reply_message(http, reply_token, resp)
+            return True
 
     # ─── /memo — AI返答をスキップして Wiki にだけ保存（軽量・低コスト） ───
     if message.startswith("/memo "):
@@ -1373,13 +1425,43 @@ async def handle_brain_commands(app, user_id, message, reply_token):
     return False
 
 
+# ★2026-07-20 スクショ事故 fix + §1.15 cross-check 反映: アラインメント質問 pending 中に
+# 次の入力を無条件で回答扱いして飲み込み、業務質問「昨日の売上は?」が回答扱いされた。
+# 「新しい質問・依頼」に**高精度**シグナル (疑問符 / コマンド / 業務キーワード / 命令形依頼末尾)
+# でのみ判定 = 内省回答 (会議/予定/どこ 等の一般語を含む本物の回答) を弾かない。cross-check が
+# 旧 allowlist の false-negative (本物回答を落とす) を実証したため、名詞 allowlist を廃し
+# 「回答らしさ vs 依頼らしさ」の依頼側 cue に反転。
+_FRESH_QUERY_RE = re.compile(
+    r"[?？]\s*$"                                                  # 疑問符で終わる
+    r"|^\s*[/!]"                                                   # コマンド
+    r"|売上|売り上げ|客数|客単価|予算|前年|前月比|昨対|ランキング|"     # 業務データ語
+    r"順位|決算|粗利|日販|達成率|就業規則|公休|有給|産休|育休|副業|賞与|規程|"
+    r"(?:して|しといて|してくれ|してほしい|お願い|頼む|ちょうだい|"        # 命令形・依頼末尾 cue
+    r"教えて|調べて|見せて|出して|まとめて|要約して|作って|比較して)"
+    r"[。!！\s]*$"
+)
+
+
+def looks_like_fresh_query(message: str) -> bool:
+    """アラインメント回答でなく、新しい質問・依頼に見えるか (誤飲み込み防止)。"""
+    return bool(_FRESH_QUERY_RE.search((message or "").strip()))
+
+
 async def handle_alignment_answer(app, user_id: str, message: str) -> bool:
-    """アライメント質問への回答を処理。回答待ち状態ならTrue。"""
+    """アライメント質問への回答を処理。回答待ち状態かつ回答らしければTrue。"""
     import json
     r = app.state.redis
     brain: BrainWiki = app.state.brain
     pending = await r.get(f"align:{user_id}")
     if not pending:
+        return False
+    # 新しい質問・依頼に見える入力は回答として消費しない → run_agent へ流す。
+    # ★cross-check 反映: skip 時は align state を**削除**する (残すと後続の無関係な平叙文が
+    # 古い質問の回答として mis-attribute される 24h 窓が開くため)。取りこぼした質問は
+    # persona_gap が再提示する。
+    if looks_like_fresh_query(message):
+        logger.info(f"alignment answer skipped (fresh query), state cleared: {message[:40]!r}")
+        await r.delete(f"align:{user_id}")
         return False
 
     question_data = json.loads(pending)

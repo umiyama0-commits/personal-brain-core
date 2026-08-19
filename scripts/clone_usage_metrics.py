@@ -59,7 +59,29 @@ def _is_satisfaction(text: str) -> bool:
     return any(p in text for p in SATISFACTION_SIGNALS)
 
 
+def split_bot_served(records: list[dict]) -> tuple[list[dict], int]:
+    """bot が実際に応答した record と、グループの silent listen 分を分離する。
+
+    ★2026-08-10 (再ローンチ総点検 critical): 利用実態が 3 倍に膨れていた。
+    実測 30 日: 「292 件/24 人」のうち 199 件はグループの人間同士の雑談で、
+    bot は 1 件も返答していない (main.py の group handler が silent listen で
+    channel_id 付き record を積む設計)。実利用は DM 94 件/17 人。
+    KPI の分母は「bot が応答した質問」でなければ、再ローンチの効果測定が歪む。
+    判定: channel_id 無し (DM) は全部 / channel_id 有りは assistant 応答が
+    存在する channel のみを「bot 利用」と数える。
+    """
+    dm = [r for r in records if not r.get("channel_id")]
+    served_channels = {r.get("channel_id") for r in records
+                       if r.get("channel_id") and r.get("role") == "assistant"}
+    grp_served = [r for r in records
+                  if r.get("channel_id") and r.get("channel_id") in served_channels]
+    listen_only = sum(1 for r in records
+                      if r.get("channel_id") and r.get("channel_id") not in served_channels)
+    return dm + grp_served, listen_only
+
+
 def calc_volume_depth(records: list[dict]) -> dict:
+    records, group_listen_turns = split_bot_served(records)
     sessions = group_by_session(records, gap_minutes=30)
     user_turns = [r for r in records if r.get("role") == "user"]
     unique_users = set(r.get("user_id") for r in records if r.get("user_id"))
@@ -75,6 +97,7 @@ def calc_volume_depth(records: list[dict]) -> dict:
     abandon_rate = round(abandon / len(sessions), 3) if sessions else 0
 
     avg_turns = round(len(user_turns) / max(1, len(sessions)), 1)
+    # グループ silent listen (bot 非応答) は KPI 分母から除外し、参考値としてのみ持つ
 
     # by_hour
     by_hour = [0] * 24
@@ -88,6 +111,7 @@ def calc_volume_depth(records: list[dict]) -> dict:
     peak_hour = by_hour.index(max(by_hour)) if max(by_hour) > 0 else None
 
     return {
+        "group_listen_turns": group_listen_turns,
         "volume": {
             "total_conversations": len(sessions),
             "total_turns": len(user_turns),
@@ -323,11 +347,11 @@ async def main():
     anomalies = result.get("anomalies", [])
     if anomalies:
         try:
-            from clone_improve_lib import line_push  # type: ignore
+            from clone_improve_lib import line_push, line_push_digest  # type: ignore
             msg = [f"📊 利用metrics anomaly ({target_date}、前日比±50%超):"]
             for a in anomalies:
                 msg.append(f"  {a['metric']}: {a['prev_day']} → {a['value']} (×{a['ratio']})")
-            line_push("\n".join(msg))
+            line_push_digest("\n".join(msg), "利用集計")
         except Exception as e:
             logger.warning(f"anomaly push failed: {e}")
     # cron 成否を bot_events に記録 (= 過去の silent cron fail 事故対策、observability 統一)

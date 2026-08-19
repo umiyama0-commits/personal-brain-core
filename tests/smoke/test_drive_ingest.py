@@ -16,10 +16,10 @@ REPO = Path(__file__).resolve().parent.parent.parent
 @pytest.mark.smoke
 def test_extract_drive_urls_presentation():
     from services.drive_ingest import extract_drive_urls
-    text = "資料はこれ https://docs.google.com/presentation/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345678901234/edit?usp=sharing"
+    text = "資料はこれ https://docs.google.com/presentation/d/1_l8_rMCwt6AAYbbVXjA8-WW6SSiZehZllMN1YDgnQVY/edit?usp=sharing"
     urls = extract_drive_urls(text)
     assert len(urls) == 1
-    assert "presentation/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345678901234" in urls[0]
+    assert "presentation/d/1_l8_rMCwt6AAYbbVXjA8-WW6SSiZehZllMN1YDgnQVY" in urls[0]
 
 
 @pytest.mark.smoke
@@ -58,8 +58,8 @@ def test_extract_drive_urls_no_match():
 @pytest.mark.smoke
 def test_extract_id():
     from services.drive_ingest import _extract_id
-    url = "https://docs.google.com/presentation/d/1AbCdEfGhIjKlMnOpQrStU/edit?usp=sharing"
-    assert _extract_id(url) == "1AbCdEfGhIjKlMnOpQrStU"
+    url = "https://docs.google.com/presentation/d/1_l8_rMCwt6AAYbbVXjA8/edit?usp=sharing"
+    assert _extract_id(url) == "1_l8_rMCwt6AAYbbVXjA8"
 
 
 @pytest.mark.smoke
@@ -160,7 +160,7 @@ def test_build_context_block_success(monkeypatch):
 def test_build_context_block_permission_denied_with_address(monkeypatch):
     """403 returned → 「viewer として <BOT_SHARE_ADDRESS> に共有して」テンプレを context に。"""
     import importlib
-    monkeypatch.setenv("BOT_GDRIVE_SHARE_ADDRESS", "bot@owndays.co.jp")
+    monkeypatch.setenv("BOT_GDRIVE_SHARE_ADDRESS", "bot-account@example.co.jp")
     from services import drive_ingest as di
     importlib.reload(di)
 
@@ -176,7 +176,7 @@ def test_build_context_block_permission_denied_with_address(monkeypatch):
         "見て https://docs.google.com/presentation/d/aaaaaaaaaaaaaaaaaaaaaaaa/edit"
     )
     assert "【閲覧権限が無い資料】" in out
-    assert "bot@owndays.co.jp" in out
+    assert "bot-account@example.co.jp" in out
     assert "viewer" in out or "閲覧者" in out
 
 

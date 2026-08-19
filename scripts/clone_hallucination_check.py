@@ -55,7 +55,7 @@ import httpx  # ★2026-07-02 P1c: evidence を稼働 bot の /api/brain/search 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from clone_improve_lib import (  # noqa: E402
-    call_llm, line_push, append_jsonl, ensure_dirs,
+    call_llm, line_push, line_push_digest, append_jsonl, ensure_dirs,
     load_conversations, JST, IMPROVE_DIR, WIKI_DIR,
     pick_cross_family_judge,
 )
@@ -412,7 +412,7 @@ async def run_check(
             f"主な矛盾:\n" + "\n".join(top_contradicted) + "\n\n"
             f"詳細: {out_path}"
         )
-        line_push(msg)
+        line_push_digest(msg, "幻覚検知")
 
     return summary
 

@@ -10,6 +10,22 @@
 """
 from __future__ import annotations
 
+
+def _temp_ok(model: str) -> bool:
+    """temperature を送ってよいモデルか (★2026-08-03 silent fallback 事故)。"""
+    try:
+        import sys as _s
+        from pathlib import Path as _P
+        _root = str(_P(__file__).resolve().parents[2])
+        if _root not in _s.path:
+            _s.path.insert(0, _root)
+        from brain_wiki_helpers.model_params import supports_temperature
+        return supports_temperature(model)
+    except Exception:
+        return True
+
+
+
 import asyncio
 import json
 import logging
@@ -152,7 +168,9 @@ async def call_llm(
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": max_tokens,
-            "temperature": temperature,
+            # ★2026-08-03: temperature 非対応モデル (Opus 4.8 / Fable 5) へ送ると 400 →
+            # litellm が無言で gpt-4o へ fallback する。送信前に落とす。
+            **({"temperature": temperature} if _temp_ok(model) else {}),
         },
         timeout=timeout,
     )
@@ -191,7 +209,7 @@ async def call_llm_with_retry(
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": max_tokens,
-                    "temperature": temperature,
+                    **({"temperature": temperature} if _temp_ok(model) else {}),
                 },
                 timeout=timeout,
             )

@@ -234,7 +234,7 @@ def test_bot_search_default_mimes_includes_pdf():
 
 
 def test_bot_search_default_mimes_includes_office():
-    """★2026-06-07 海山指示「サンプルリンク新規出店PJ (.pptx) が出ない」修正:
+    """★2026-06-07 海山指示「クリエイトリンク包括出店PJ (.pptx) が出ない」修正:
     Office 形式 (.pptx/.xlsx/.docx) を default 検索対象に追加。
     (= bot は BINARY_DOWNLOAD で既に取込・extract 済なのに検索不可だった不整合の解消)
     tuple 本体に限定して照合 (= BINARY_DOWNLOAD 側の同 MIME を誤検出しないため)。"""
@@ -250,11 +250,11 @@ def test_bot_search_default_mimes_includes_office():
 
 def test_expand_query_prompt_prioritizes_proper_nouns():
     """★2026-06-07 海山指示「Keyword 選定が質問の意図を捉えてない」修正:
-    expand_query prompt が 固有名詞 (サンプルリンク 等) を最優先し、
+    expand_query prompt が 固有名詞 (クリエイトリンク 等) を最優先し、
     generic な場面語 (会議/議題) を検索対象から外すよう指示しているか (= keyword 抽出の主因 fix)。"""
     src = (REPO_ROOT / "services" / "gemini_query.py").read_text(encoding="utf-8")
     # 固有名詞-in-状況説明 の例 (例5) が存在
-    assert "サンプルリンク" in src, "固有名詞-in-状況説明 の例 (例5) が存在すること"
+    assert "クリエイトリンク" in src, "固有名詞-in-状況説明 の例 (例5) が存在すること"
     # 固有名詞最優先ルール
     assert "固有名詞" in src and "最優先" in src, "固有名詞を最優先する rule が存在"
     # generic 場面語の除外ルール
@@ -274,17 +274,17 @@ def test_drive_alias_expansions(tmp_path, monkeypatch):
     monkeypatch.setattr(g, "DRIVE_ALIASES_PATH", str(af))
 
     # enabled=True → 別表記を展開
-    af.write_text(json.dumps({"サンプルリンク": {"aliases": ["新規出店PJ", "新店出店PJ"], "enabled": True}},
+    af.write_text(json.dumps({"クリエイトリンク": {"aliases": ["包括出店PJ", "新店出店PJ"], "enabled": True}},
                              ensure_ascii=False), encoding="utf-8")
-    assert g._drive_alias_expansions("サンプルリンクって何", ["新店会議"]) == ["新規出店PJ", "新店出店PJ"]
+    assert g._drive_alias_expansions("クリエイトリンクって何", ["新店会議"]) == ["包括出店PJ", "新店出店PJ"]
     # 含まない → 空
     assert g._drive_alias_expansions("武蔵小山の売上", ["予算"]) == []
     # 既存 keyword と被る alias は dedup で除外
-    assert g._drive_alias_expansions("サンプルリンク", ["新規出店PJ"]) == ["新店出店PJ"]
+    assert g._drive_alias_expansions("クリエイトリンク", ["包括出店PJ"]) == ["新店出店PJ"]
     # ★enabled=False (未承認) は無視 = 検索に効かない (誤リンク遮断)
-    af.write_text(json.dumps({"サンプルリンク": {"aliases": ["新規出店PJ"], "enabled": False}},
+    af.write_text(json.dumps({"クリエイトリンク": {"aliases": ["包括出店PJ"], "enabled": False}},
                              ensure_ascii=False), encoding="utf-8")
-    assert g._drive_alias_expansions("サンプルリンク", []) == []
+    assert g._drive_alias_expansions("クリエイトリンク", []) == []
     # file 空 → 空
     af.write_text("{}", encoding="utf-8")
-    assert g._drive_alias_expansions("サンプルリンク", []) == []
+    assert g._drive_alias_expansions("クリエイトリンク", []) == []

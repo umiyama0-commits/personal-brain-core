@@ -140,7 +140,7 @@
 | | 内容 | 必要技術 |
 |---|---|---|
 | **ツール呼び出し** | LINE Works / Drive / Slack / Calendar / 売上 API / Plaud / etc. を AI が呼ぶ | Anthropic tool use, function calling |
-| **タスク実行** | 「議事録 draft 作って」「○○AM の月次レポート出して」型 | Agent orchestration (Claude Agent SDK or LangGraph) |
+| **タスク実行** | 「議事録 draft 作って」「中田AM の月次レポート出して」型 | Agent orchestration (Claude Agent SDK or LangGraph) |
 | **複数 turn の自律行動** | 1 リクエストで複数ステップ実行 (= データ取得 → 分析 → 整形 → 送信) | Agent loop + checkpointing |
 | **実行前確認** | 重要アクション (= 書き込み / 外部送信) は AI が「これでいい?」と聞く | Human-in-the-loop pattern |
 | **監査ログ + ロールバック** | 実行内容を全記録、必要なら巻き戻し | Audit log + reverse operation |
@@ -162,7 +162,7 @@
 #### A. データ集計・レポート系 (低リスク、最初に着手)
 
 - 「来週の経営会議用に過去 4 週の売上トレンド資料 draft」
-- 「○○AM 管轄店の月次サマリ + 前年比を Excel で」
+- 「中田AM 管轄店の月次サマリ + 前年比を Excel で」
 - 「FY27 5 月の進捗を Slack の経営チャネルに投稿する文章を作って」 (= 投稿は人が confirm)
 
 #### B. 議事録・文書生成 (中リスク、要確認)

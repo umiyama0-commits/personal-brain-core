@@ -24,6 +24,7 @@ import argparse
 import base64
 import json
 import logging
+import os
 import re
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -109,7 +110,20 @@ def sync_calendar(creds: Credentials, days: int = 1, dry_run: bool = False) -> l
     # 全カレンダーのリストを取得
     calendar_list = service.calendarList().list().execute()
     calendars = calendar_list.get("items", [])
-    logger.info(f"  カレンダー数: {len(calendars)}")
+
+    # ★2026-08-03: **共有されただけのカレンダーは calendarList に載らない** (Google の仕様。
+    #   ACL 付与と「マイカレンダーへの購読」は別で、購読には書込 scope が要る = 本 bot は
+    #   readonly のため不可)。実害: 海山 (umiyama@) の予定を umiyama-ai@ に共有しても
+    #   bot からは 0 件に見え、「今日の予定」が常に空だった (認証は正常なので気付きにくい)。
+    #   → 明示指定した calendarId を **ID 直読み**で足す (events().list は購読不要で通る)。
+    #   env EXTRA_CALENDAR_IDS (カンマ区切り) で追加。重複は id で除去。
+    _extra = [c.strip() for c in os.getenv("EXTRA_CALENDAR_IDS", "").split(",") if c.strip()]
+    _known = {c.get("id") for c in calendars}
+    for cid in _extra:
+        if cid not in _known:
+            calendars.append({"id": cid, "summary": cid})
+            _known.add(cid)
+    logger.info(f"  カレンダー数: {len(calendars)} (うち明示指定 {len(_extra)})")
 
     all_events = []
     for cal in calendars:

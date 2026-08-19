@@ -104,8 +104,12 @@ def load_recent(
     n: int = 20,
     channel_id: Optional[str] = None,
     scope: str = "any",
+    with_ts: bool = False,
 ) -> list[dict]:
     """最新 n 件を読み、role/content 形式で返す (LLM messages 用).
+
+    with_ts=True で各 record に "ts" (ISO 文字列) を含める (★2026-07-22 follow-up 併合の
+    鮮度判定用。default False = LLM messages にそのまま渡す既存 caller は不変)。
 
     ★2026-05-24 channel_id filter 追加 (Tier 0 group 対応):
     - scope="any" (default): channel_id 関係なく全件 (= 既存挙動、後方互換)
@@ -145,7 +149,12 @@ def load_recent(
 
     records = []
     for r in filtered[-n:]:
-        records.append({"role": r["role"], "content": r["text"]})
+        rec = {"role": r["role"], "content": r["text"]}
+        if with_ts:
+            # ★2026-07-22 follow-up 併合の鮮度判定用 (数日前の会話を継続扱いしない)。
+            #   LLM messages にそのまま渡す既存 caller を壊さないため opt-in。
+            rec["ts"] = r.get("timestamp")
+        records.append(rec)
     return records
 
 

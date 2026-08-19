@@ -33,27 +33,27 @@ def hallucination_mod(isolated_brain_root, monkeypatch):
 async def test_extract_claims_returns_list(hallucination_mod, monkeypatch):
     """LLM mock で claim 抽出が JSON parse → list 返却。"""
     async def fake_call_llm(prompt, model=None, max_tokens=None, temperature=None):
-        return '```json\n{"claims": ["関東Aエリアの売上は 1,500,000 円", "客数 100"]}\n```'
+        return '```json\n{"claims": ["関東Aエリアの売上は 1,777,111 円", "客数 149"]}\n```'
 
     monkeypatch.setattr(hallucination_mod, "call_llm", fake_call_llm)
     claims = await hallucination_mod.extract_claims(
-        "関東Aエリアの売上は 1,500,000 円、客数 100 人。" * 3
+        "関東Aエリアの売上は 1,777,111 円、客数 149 人。" * 3
     )
-    assert "関東Aエリアの売上は 1,500,000 円" in claims
-    assert "客数 100" in claims
+    assert "関東Aエリアの売上は 1,777,111 円" in claims
+    assert "客数 149" in claims
 
 
 @pytest.mark.integration
 async def test_verify_claim_supported(hallucination_mod, monkeypatch):
     """evidence と一致する claim は supported 判定。"""
     async def fake_call_llm(prompt, model=None, max_tokens=None, temperature=None):
-        return '```json\n{"verdict": "supported", "reason": "wiki に同じ数字あり", "evidence_snippet": "1,500,000 円"}\n```'
+        return '```json\n{"verdict": "supported", "reason": "wiki に同じ数字あり", "evidence_snippet": "1,777,111 円"}\n```'
 
     monkeypatch.setattr(hallucination_mod, "call_llm", fake_call_llm)
     evidence = [{"source": "knowledge/owndays-daily-sales.md",
-                 "content": "関東A 1,500,000 円"}]
+                 "content": "関東A 1,777,111 円"}]
     result = await hallucination_mod.verify_claim(
-        "関東Aエリアの売上は 1,500,000 円", evidence, "応答テキスト全体"
+        "関東Aエリアの売上は 1,777,111 円", evidence, "応答テキスト全体"
     )
     assert result["verdict"] == "supported"
 
@@ -94,7 +94,7 @@ async def test_run_check_full_flow_with_seed(
         }, ensure_ascii=False),
         json.dumps({
             "timestamp": now.isoformat(), "user_id": "u1", "role": "assistant",
-            "text": "関東Aエリアの売上は 1,500,000 円、客数 100 人、客単価 15,000 円でした。"
+            "text": "関東Aエリアの売上は 1,777,111 円、客数 149 人、客単価 15,168 円でした。"
                     "今日は平日にしては高めの数字。先週の同曜日と比べても約 10% 高め、"
                     "イベントや天気の影響を見たほうがいい。"
         }, ensure_ascii=False),
@@ -108,9 +108,9 @@ async def test_run_check_full_flow_with_seed(
     async def fake_call_llm(prompt, model=None, max_tokens=None, temperature=None):
         call_log.append({"model": model, "prompt_head": prompt[:100]})
         if "fact-extraction" in prompt or "factual claim" in prompt:
-            return '```json\n{"claims": ["関東Aエリア売上 1,500,000 円", "客数 100"]}\n```'
+            return '```json\n{"claims": ["関東Aエリア売上 1,777,111 円", "客数 149"]}\n```'
         if "fact-verification" in prompt or "verdict" in prompt:
-            return '```json\n{"verdict": "supported", "reason": "wiki と一致", "evidence_snippet": "関東A 1,500,000 円"}\n```'
+            return '```json\n{"verdict": "supported", "reason": "wiki と一致", "evidence_snippet": "関東A 1,777,111 円"}\n```'
         return "{}"
 
     monkeypatch.setattr(hallucination_mod, "call_llm", fake_call_llm)

@@ -35,11 +35,11 @@ _ISSUE = (
     "URL: https://stapa.owndays.net/owndays-magazine-details/108\n"
     "▼ 目次\n"
     f"■{MARKER}\n"          # ← 目次の marker (直後に別項目 = 短い)
-    "■見本課長の一喝\n"
+    "■山本部長の一喝\n"
     "■編集後記\n"
     "ご挨拶\n本文とは無関係の挨拶。\n"
     f"■{MARKER}\n 社長\n\n{BODY}\n"   # ← 本文の marker (byline + 長文)
-    "■見本課長の一喝\n 見本一\n見本さんの記事本文。\n"
+    "■山本部長の一喝\n 山本亮\n山本さんの記事本文。\n"
 )
 
 
@@ -53,7 +53,7 @@ def test_longest_segment_picks_body_not_toc():
     m = _mod()
     body = m.longest_diary_segment(_ISSUE)
     assert "嘘である" in body and "海山でした" in body, "本文が取れていない"
-    assert "見本課長" not in body, "次セクションを巻き込んでいる"
+    assert "山本部長" not in body, "次セクションを巻き込んでいる"
     assert "社長" not in body.splitlines()[0], "byline が残っている"
 
 
@@ -88,7 +88,7 @@ def test_collect_dedups_by_id_keeps_longer(tmp_path):
     (notes / "onmaga_batch_108-108.md").write_text("Vol.356\n" + _ISSUE, encoding="utf-8")
     (notes / "mogumog_Vol_356_id108.md").write_text(
         "URL: https://stapa.owndays.net/owndays-magazine-details/108\n"
-        f"■{MARKER}\n{MARKER}\n見本課長の一喝\n",  # 旧 bug 相当の目次断片
+        f"■{MARKER}\n{MARKER}\n山本部長の一喝\n",  # 旧 bug 相当の目次断片
         encoding="utf-8")
     cols = m.collect_all_columns(notes)
     ids = [c["id"] for c in cols]
